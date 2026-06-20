@@ -1,10 +1,43 @@
-# DiaCTC
+<div align="center">
 
-Constrained CTC / WFST decoding for automatic Arabic diacritization with Wav2Vec2.
+# Constrained CTC Decoding for Efficient Diacritic Restoration
 
-DiaCTC fine-tunes a Wav2Vec2 CTC model and decodes diacritics either with plain
-CTC or with a WFST that constrains the output to valid diacritics of the known
-(undiacritized) transcript. Evaluation reports DER, WER, and SER.
+**DiaCTC** — constrained CTC / WFST decoding for Arabic diacritization with Wav2Vec2
+
+[![Paper (arXiv)](https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/TBD)
+[![Code](https://img.shields.io/badge/Code-GitHub-181717?logo=github)](https://github.com/rufaelfekadu/DiaCTC)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+*Rufael Marew · Amr Keleg · Hanan Aldarmaki · MBZUAI*
+
+</div>
+
+---
+
+In this work, we address diacritic restoration for Arabic speech transcripts. Most speech data are undiacritized, limiting the ability of modeling fine-grained phonological distinctions. The speech modality has recently been explored as a way to complement text-based diacritic restoration efforts. We propose an efficient non-autoregressive approach for speech-to-text diacritization based on Connectionist Temporal Classification (CTC). Our method incorporates hard constraints during decoding by constructing a character-level diacritization lattice from an undiacritized transcript and restricting hypotheses to valid diacritized realizations. We evaluate on Classical Arabic and Modern Standard Arabic test sets (namely, ArVoice and ClArTTS) against a more computationally-complex multi-modal diacritic restoration baseline, and show statistically significant reductions in diacritic error rates in both, demonstrating that the proposed approach offers both performance and efficiency gains
+
+> **Accepted at Interspeech 2026**
+
+## Results
+
+Diacritic restoration on **ClArTTS** (Classical Arabic) and **ArVoice** (MSA).
+WER and DER (%) are from Table 3 in the paper; DER includes *no diacritic* and
+word-ending diacritics. Base encoder:
+[jonatasgrosman/wav2vec2-large-xlsr-53-arabic](https://huggingface.co/jonatasgrosman/wav2vec2-large-xlsr-53-arabic).
+
+| Training data | Test set | WER ↓ | DER ↓ | Model |
+|:--------------|:---------|------:|------:|:------|
+| ClArTTS | ClArTTS | 11.21 | 3.53 | [HF *(coming soon)*](#) |
+| ClArTTS | ArVoice | 39.89 | 12.04 | [HF *(coming soon)*](#) |
+| ArVoice | ClArTTS | 34.94 | 11.86 | [HF *(coming soon)*](#) |
+| ArVoice | ArVoice | 27.87 | 7.73 | [HF *(coming soon)*](#) |
+| ClArTTS + ArVoice | ClArTTS | 13.05 | 3.80 | [HF *(coming soon)*](#) |
+| ClArTTS + ArVoice | ArVoice | 30.36 | 8.69 | [HF *(coming soon)*](#) |
+
+For comparison, the **Text + ASR** baseline on combined training reaches 29.63 /
+9.05 WER/DER on ClArTTS and 34.47 / 9.93 on ArVoice; DiaCTC improves DER on
+both test sets with a single-stream CTC decoder (see paper for full baselines and
+bootstrap significance).
 
 ## Installation
 
@@ -150,3 +183,18 @@ pytest
 ## License
 
 This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+
+## Citation
+
+If you use DiaCTC in your research, please cite:
+
+```bibtex
+@article{marew2026constrained,
+  title   = {Constrained CTC Decoding for Efficient Diacritic Restoration},
+  author  = {Marew, Rufael and Keleg, Amr and Aldarmaki, Hanan},
+  journal = {arXiv preprint arXiv:TBD},
+  year    = {2026}
+}
+```
+
+*(Update the arXiv ID once the preprint is available.)*
