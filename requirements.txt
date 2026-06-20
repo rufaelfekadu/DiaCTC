@@ -1,0 +1,19 @@
+torch==2.9.1
+torchaudio==2.9.1
+transformers>=4.57.6
+soundfile==0.13.1
+librosa>=0.11.0
+pyarabic>=0.6.10
+datasets>=2.0.0,<4.0.0
+jiwer>=3.0.0
+tqdm>=4.65.0
+numpy<2.0.0
+evaluate>=0.4.6
+accelerate>=1.1.0
+pandas>=2.0.0
+tensorboard>=2.20.0
+
+# k2 is required for WFST/CTC lattice decoding and must match your CUDA + PyTorch
+# versions. Install it separately, e.g. (CUDA 12.8 / torch 2.9.1):
+#   pip install k2==1.24.4.dev20251118+cuda12.8.torch2.9.1 -f https://k2-fsa.github.io/k2/cuda.html
+# See https://k2-fsa.github.io/k2/installation/index.html
