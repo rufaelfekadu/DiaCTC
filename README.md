@@ -196,5 +196,3 @@ If you use DiaCTC in your research, please cite:
   year    = {2026}
 }
 ```
-
-*(Update the arXiv ID once the preprint is available.)*
