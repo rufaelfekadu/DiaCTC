@@ -146,3 +146,7 @@ evaluate("gt.txt", "pred.txt", strict=True)  # strict variants
 pip install -e ".[dev]"
 pytest
 ```
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.

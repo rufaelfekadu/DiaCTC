@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "diactc"
 version = "0.1.0"
 description = "Constrained CTC/WFST decoding for automatic Arabic diacritization with Wav2Vec2"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "torch==2.9.1",
