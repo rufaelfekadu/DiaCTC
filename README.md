@@ -6,6 +6,7 @@
 
 [![Paper (arXiv)](https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/TBD)
 [![Code](https://img.shields.io/badge/Code-GitHub-181717?logo=github)](https://github.com/rufaelfekadu/DiaCTC)
+[![Demo](https://img.shields.io/badge/Demo-Hugging%20Face-yellow)](https://huggingface.co/spaces/rufaelfekadu/DiaCTC)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 *Rufael Marew · Amr Keleg · Hanan Aldarmaki · MBZUAI*
@@ -18,6 +19,11 @@ In this work, we address diacritic restoration for Arabic speech transcripts. Mo
 
 > **Accepted at Interspeech 2026**
 
+## Try the demo
+
+Interactive demo on Hugging Face Spaces: **[rufaelfekadu/DiaCTC](https://huggingface.co/spaces/rufaelfekadu/DiaCTC)**
+
+
 ## Results
 
 Diacritic restoration on **ClArTTS** (Classical Arabic) and **ArVoice** (MSA).
@@ -27,12 +33,12 @@ word-ending diacritics. Base encoder:
 
 | Training data | Test set | WER ↓ | DER ↓ | Model |
 |:--------------|:---------|------:|------:|:------|
-| ClArTTS | ClArTTS | 11.21 | 3.53 | [HF *(coming soon)*](#) |
-| ClArTTS | ArVoice | 39.89 | 12.04 | [HF *(coming soon)*](#) |
-| ArVoice | ClArTTS | 34.94 | 11.86 | [HF *(coming soon)*](#) |
-| ArVoice | ArVoice | 27.87 | 7.73 | [HF *(coming soon)*](#) |
-| ClArTTS + ArVoice | ClArTTS | 13.05 | 3.80 | [HF *(coming soon)*](#) |
-| ClArTTS + ArVoice | ArVoice | 30.36 | 8.69 | [HF *(coming soon)*](#) |
+| ClArTTS | ClArTTS | 11.21 | 3.53 | [diactc-wav2vec2-clartts](https://huggingface.co/rufaelfekadu/diactc-wav2vec2-clartts) |
+| ClArTTS | ArVoice | 39.89 | 12.04 | [diactc-wav2vec2-clartts](https://huggingface.co/rufaelfekadu/diactc-wav2vec2-clartts) |
+| ArVoice | ClArTTS | 34.94 | 11.86 | *(coming soon)* |
+| ArVoice | ArVoice | 27.87 | 7.73 | *(coming soon)* |
+| ClArTTS + ArVoice | ClArTTS | 13.05 | 3.80 | *(coming soon)* |
+| ClArTTS + ArVoice | ArVoice | 30.36 | 8.69 | *(coming soon)* |
 
 For comparison, the **Text + ASR** baseline on combined training reaches 29.63 /
 9.05 WER/DER on ClArTTS and 34.47 / 9.93 on ArVoice; DiaCTC improves DER on
