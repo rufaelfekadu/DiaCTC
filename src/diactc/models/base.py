@@ -147,7 +147,8 @@ class DiacritizationModel(ABC):
         log_probs = torch.log_softmax(logits, dim=-1)
         greedy_ids = log_probs.argmax(dim=-1).cpu().numpy().tolist()
         # ignore padding and blank tokens
-        greedy_ids = [x for x in greedy_ids if x > 0 and x != self.token2id[NO_DIAC_TOKEN] and x != self.token2id[UNK_DIAC_TOKEN]]
+        greedy_ids = [x for x in greedy_ids if x > 0 ]
+        
         return greedy_ids
 
     @abstractmethod
