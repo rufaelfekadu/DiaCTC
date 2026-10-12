@@ -165,13 +165,7 @@ class Wav2Vec2DiacritizationModel(DiacritizationModel):
             log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs
 
-    def diacritize(self, text, audio_path, constrained=True, method="wfst"):
-        # preprocess text
-        text = preprocess_text(text)
-        # Use the same form here and in the pattern so that UNK replacement can
-        # align to these characters (including word delimiter tokens).
-        text_for_pattern = text.replace(" ", self.word_delimiter_token)
-
+    def load_audio(self, audio_path):
         # read audio and get audio array
         audio, sr = librosa.load(audio_path)
         if sr != self.sr:
@@ -182,28 +176,26 @@ class Wav2Vec2DiacritizationModel(DiacritizationModel):
         if audio.ndim == 2:
             audio = audio[:, 0]
 
-        audio = np.array(audio, dtype=np.float32)
-        audio_duration = len(audio) / sr
-        start_time = time.time()
+        return np.array(audio, dtype=np.float32)
 
-        # get logits
-        log_probs = self.get_logits(audio)
-        pattern = form_wildcard_pattern(text_for_pattern)
-
-        if method == "wfst":
-            decoded = self.decode_wfst(log_probs, pattern, constrained=constrained)
-        elif method == "ctc":
-            decoded = self.decode_ctc(log_probs)
-        elif method == "ctc_greedy":
-            decoded = self.decode_ctc_greedy(log_probs)
-        else:
-            raise ValueError(f"Invalid method: {method}")
-
+    def decoded_to_text(self, decoded, text_for_pattern):
+        '''
+        Convert decoded ids to diacritized text.
+        Args:
+            decoded: decoded ids
+            text_for_pattern: undiacritized text the pattern was built from
+        Returns:
+            diacritized text
+        '''
         decoded_text = "".join(self.id2token[i] for i in decoded)
 
         # skip <no_diac> and <unk_diac> tokens
         decoded_text = decoded_text.replace(NO_DIAC_TOKEN, "")
         decoded_text = decoded_text.replace(UNK_DIAC_TOKEN, "")
+
+        # map merged diacritic tokens back to their diacritics
+        for k, v in REVERSE_MERGED_DIAC_TO_TOKEN_MAP.items():
+            decoded_text = decoded_text.replace(k, v)
 
         # Replace base '<unk>' tokens with the corresponding original characters from the undiacritized text.
         decoded_text = self._replace_unk_with_source(decoded_text, text_for_pattern)
@@ -212,7 +204,33 @@ class Wav2Vec2DiacritizationModel(DiacritizationModel):
         if self.word_delimiter_token:
             decoded_text = decoded_text.replace(self.word_delimiter_token, " ")
 
-        decoded_text = decoded_text.strip()
+        return decoded_text.strip()
+
+    def diacritize(self, text, audio_path, constrained=True, method="wfst", confidence_threshold=None):
+        # preprocess text
+        text = preprocess_text(text)
+        # Use the same form here and in the pattern so that UNK replacement can
+        # align to these characters (including word delimiter tokens).
+        text_for_pattern = text.replace(" ", self.word_delimiter_token)
+
+        audio = self.load_audio(audio_path)
+        audio_duration = len(audio) / self.sr
+        start_time = time.time()
+
+        # get logits
+        log_probs = self.get_logits(audio)
+        pattern = form_wildcard_pattern(text_for_pattern)
+
+        if method == "wfst":
+            decoded = self.decode_wfst(log_probs, pattern, constrained=constrained, confidence_threshold=confidence_threshold)
+        elif method == "ctc":
+            decoded = self.decode_ctc(log_probs)
+        elif method == "ctc_greedy":
+            decoded = self.decode_ctc_greedy(log_probs)
+        else:
+            raise ValueError(f"Invalid method: {method}")
+
+        decoded_text = self.decoded_to_text(decoded, text_for_pattern)
 
         end_time = time.time()
         rtf = (end_time - start_time) / audio_duration

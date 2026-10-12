@@ -145,6 +145,28 @@ python scripts/inference.py \
 unconstrained WFST decoding. Outputs (`gt.txt`, `pred.txt`, `metrics.json`) are
 written under `outputs/decode/wav2vec/<method>/[constrained|unconstrained]/<dataset>/`.
 
+With `--method wfst`, `--confidence_threshold <0-1>` leaves a character undiacritized
+when the lattice posterior of its decoded diacritic is below the threshold. Outputs
+then go to a `conf_<threshold>/` subdirectory, so the unthresholded run is kept.
+
+To pick the threshold, `scripts/tune_threshold.py` decodes each manifest once and
+scores a grid of thresholds (DER, precision and recall of the emitted diacritics,
+coverage), per manifest and pooled:
+
+```bash
+python scripts/tune_threshold.py \
+    --model_path outputs/finetune/experiments/run-v1 \
+    --manifest_paths data/clartts/raw/test/clartts_test_metadata.json \
+    --objective precision --target_precision 0.99 \
+    --use_blank_token --use_no_diac_token --use_unk_diac_token \
+    --output_path outputs/tune_threshold \
+    --device cuda
+```
+
+`--objective precision` selects the lowest threshold whose emitted diacritics reach
+`--target_precision`; `--objective der` selects the threshold with the lowest DER.
+Results are written to `outputs/tune_threshold/[der|precision_<target>]/results.json`.
+
 ### 4. Evaluate
 
 ```bash

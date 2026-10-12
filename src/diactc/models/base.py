@@ -40,13 +40,12 @@ class DiacritizationModel(ABC):
 
     @property
     def ctc_topo(self):
-        return k2.arc_sort(k2.ctc_topo(len(self.token2id) - 1)).to(self.device)
+        # Keep CTC topology on CPU for k2 operations
+        return k2.arc_sort(k2.ctc_topo(len(self.token2id) - 1))
 
     def to(self, device):
         if hasattr(self, 'model'):
             self.model.to(device)
-        if hasattr(self, 'ctc_topo'):
-            self.ctc_topo.to(device)
         self.device = device
 
     def build_pattern_fsa(self, pattern, constrained=True):
@@ -77,26 +76,23 @@ class DiacritizationModel(ABC):
         arcs.append(f"{state} 0.0")
         txt = "\n".join(arcs)
         fsa = k2.Fsa.from_str(txt, acceptor=False, openfst=True)
-        return k2.arc_sort(fsa).to(self.device), txt
 
-    def decode_wfst(self, logits, pattern, constrained=True, search_beam=102400.0, output_beam=100000.0, min_active_states=12000, max_active_states=100000):
-        '''
-        Decode WFST.
-        Args:
-            logits: logits from the model
-            pattern: pattern to decode
-            wildcard_ids: wildcard ids
-            constrained: whether to use constrained wildcard ids
-            token2id: token to id mapping
-        Returns:
-            decoded text
-        '''
+        # Arc attributes that k2 carries through compose/intersect, so that lattice arcs
+        # can be traced back to the pattern arc they came from (0 = no pattern arc).
+        wildcard_states = torch.tensor([i for i, ch in enumerate(pattern) if ch == WILDCARD_TOKEN], dtype=torch.int32)
+        fsa.pattern_arc = torch.arange(1, fsa.num_arcs + 1, dtype=torch.int32)
+        fsa.is_wildcard = torch.isin(fsa.arcs.values()[:, 0], wildcard_states).to(torch.int32)
+
+        return k2.arc_sort(fsa), txt
+
+    def _wfst_lattice(self, logits, pattern, constrained, search_beam, output_beam, min_active_states, max_active_states):
         fsa, _ = self.build_pattern_fsa(pattern, constrained=constrained)
 
-        log_probs = torch.log_softmax(logits, dim=-1)
+        # Move logits to CPU for k2 operations (k2.compose with epsilons is CPU-only)
+        log_probs = torch.log_softmax(logits, dim=-1).cpu()
         T, V = logits.shape
-        dense = k2.DenseFsaVec(log_probs.unsqueeze(0), torch.tensor([[0, 0, T]], dtype=torch.int32)).to(self.device)
-        decoding_graph = k2.arc_sort(k2.compose(self.ctc_topo, fsa)).to(self.device)
+        dense = k2.DenseFsaVec(log_probs.unsqueeze(0), torch.tensor([[0, 0, T]], dtype=torch.int32))
+        decoding_graph = k2.arc_sort(k2.compose(self.ctc_topo, fsa))
 
         lattice = k2.intersect_dense_pruned(
             decoding_graph, dense,
@@ -106,8 +102,85 @@ class DiacritizationModel(ABC):
             max_active_states=max_active_states
         )
 
+        return lattice
+
+    def decode_wfst(self, logits, pattern, constrained=True, search_beam=102400.0, output_beam=100000.0, min_active_states=12000, max_active_states=100000, confidence_threshold=None):
+        '''
+        Decode WFST.
+        Args:
+            logits: logits from the model
+            pattern: pattern to decode
+            wildcard_ids: wildcard ids
+            constrained: whether to use constrained wildcard ids
+            token2id: token to id mapping
+            confidence_threshold: if set, a wildcard token whose lattice posterior
+                (probability among the options allowed at its position) is below this
+                value is replaced by <no_diac>, or dropped if the vocab has no <no_diac>
+        Returns:
+            decoded text
+        '''
+        if confidence_threshold is not None:
+            ids, confidences = self.decode_wfst_with_confidence(logits, pattern, constrained, search_beam, output_beam, min_active_states, max_active_states)
+            return self.apply_confidence_threshold(ids, confidences, confidence_threshold)
+
+        lattice = self._wfst_lattice(logits, pattern, constrained, search_beam, output_beam, min_active_states, max_active_states)
         best_path = k2.shortest_path(lattice, use_double_scores=False)
         aux = k2.get_aux_labels(best_path)[0]
+
+        return aux
+
+    def decode_wfst_with_confidence(self, logits, pattern, constrained=True, search_beam=102400.0, output_beam=100000.0, min_active_states=12000, max_active_states=100000):
+        '''
+        Decode WFST and score each decoded wildcard token.
+        Args:
+            same as decode_wfst
+        Returns:
+            ids: decoded ids (same as decode_wfst without a threshold)
+            confidences: one entry per id. For a wildcard token, its lattice posterior,
+                i.e. its probability among the options allowed at its position;
+                None for the fixed tokens of the pattern
+        '''
+        lattice = self._wfst_lattice(logits, pattern, constrained, search_beam, output_beam, min_active_states, max_active_states)
+        best_path = k2.shortest_path(lattice, use_double_scores=False)
+
+        # posterior of each pattern arc = total posterior of the lattice arcs that came from it
+        arc_post = lattice.get_arc_post(use_double_scores=True, log_semiring=True).exp()
+        pattern_arc = lattice.pattern_arc.long()
+        pattern_arc_post = torch.zeros(int(pattern_arc.max()) + 1, dtype=arc_post.dtype)
+        pattern_arc_post.scatter_add_(0, pattern_arc, arc_post)
+        pattern_arc_post = pattern_arc_post.tolist()
+
+        ids, confidences = [], []
+        for tid, arc, is_wildcard in zip(best_path.aux_labels.tolist(), best_path.pattern_arc.tolist(), best_path.is_wildcard.tolist()):
+            # same as k2.get_aux_labels: skip 0's and -1's
+            if tid <= 0:
+                continue
+            ids.append(tid)
+            confidences.append(pattern_arc_post[arc] if is_wildcard else None)
+
+        return ids, confidences
+
+    def apply_confidence_threshold(self, ids, confidences, confidence_threshold):
+        '''
+        Replace low-confidence wildcard tokens by <no_diac>, or drop them if the vocab has no <no_diac>.
+        Args:
+            ids, confidences: output of decode_wfst_with_confidence
+            confidence_threshold: tokens with a confidence below this value are replaced
+        Returns:
+            decoded ids
+        '''
+        token2id = self.token2id
+        no_diac_id = token2id.get(NO_DIAC_TOKEN)
+        # tokens that already mean "no / unknown diacritic" are never replaced
+        keep_ids = {token2id[t] for t in (NO_DIAC_TOKEN, UNK_DIAC_TOKEN) if t in token2id}
+
+        aux = []
+        for tid, confidence in zip(ids, confidences):
+            if confidence is not None and tid not in keep_ids and confidence < confidence_threshold:
+                if no_diac_id is None:
+                    continue
+                tid = no_diac_id
+            aux.append(tid)
 
         return aux
 
@@ -119,9 +192,10 @@ class DiacritizationModel(ABC):
         Returns:
             decoded ids
         '''
-        log_probs = torch.log_softmax(logits, dim=-1)
+        # Move logits to CPU for k2 operations
+        log_probs = torch.log_softmax(logits, dim=-1).cpu()
         T, V = log_probs.shape
-        dense = k2.DenseFsaVec(log_probs.unsqueeze(0), torch.tensor([[0, 0, T]], dtype=torch.int32)).to(self.device)
+        dense = k2.DenseFsaVec(log_probs.unsqueeze(0), torch.tensor([[0, 0, T]], dtype=torch.int32))
         lattice = k2.intersect_dense_pruned(
             self.ctc_topo, dense,
             search_beam=search_beam,
@@ -152,5 +226,5 @@ class DiacritizationModel(ABC):
         return greedy_ids
 
     @abstractmethod
-    def diacritize(self, text, audio_path, constrained=True, method="wfst"):
+    def diacritize(self, text, audio_path, constrained=True, method="wfst", confidence_threshold=None):
         raise NotImplementedError("Subclasses must implement this method")

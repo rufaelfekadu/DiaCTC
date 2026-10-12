@@ -7,7 +7,7 @@ or multi-line strings) and fill in the Arabic letter / diacritic class lists fro
 
 from diactc.constants import ARABIC_LETTERS, DIACRITIC_CLASSES
 from diactc.metrics._common import read_pair
-from diactc.metrics.coverage import diac_coverage_rate
+from diactc.metrics.coverage import diac_coverage_rate, diac_precision_recall
 from diactc.metrics.der import calculate_der as _calculate_der
 from diactc.metrics.wer import (
     calculate_wer as _calculate_wer,
@@ -27,6 +27,7 @@ __all__ = [
     "calculate_wer_strict",
     "calculate_ser_strict",
     "diac_coverage_rate",
+    "diac_precision_recall",
     "evaluate",
 ]
 

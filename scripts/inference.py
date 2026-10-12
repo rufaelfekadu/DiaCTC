@@ -73,7 +73,7 @@ def pred_manifest(args, model, manifest_path):
             text = entry["text"]
             text_no_diac = araby.strip_diacritics(text)
 
-            diacritized_text, rtf = model.diacritize(text_no_diac, audio_path, not args.unconstrained, args.method)
+            diacritized_text, rtf = model.diacritize(text_no_diac, audio_path, not args.unconstrained, args.method, args.confidence_threshold)
 
             if len(diacritized_text) != 0:
                 pred_f.write(f"{diacritized_text}\n")
@@ -100,6 +100,7 @@ def pred_manifest(args, model, manifest_path):
         "decoding_strategy": args.method,
         "dataset": dataset_name,
         "constrained": not args.unconstrained,
+        "confidence_threshold": args.confidence_threshold,
         "device": args.device,
     }
 
@@ -161,11 +162,20 @@ if __name__ == "__main__":
     parser.add_argument("--use_blank_token", action="store_true", help="Use blank token if set.")
     parser.add_argument("--use_no_diac_token", action="store_true", help="Use no diac token if set.")
     parser.add_argument("--use_unk_diac_token", action="store_true", help="Use unk diac token if set.")
+    parser.add_argument("--confidence_threshold", type=float, default=None, help="wfst only: predict no diacritic where the posterior of the decoded diacritic is below this value (0-1).")
     args = parser.parse_args()
+
+    if args.confidence_threshold is not None:
+        if args.method != "wfst":
+            parser.error("--confidence_threshold is only supported with --method wfst")
+        if not 0.0 <= args.confidence_threshold <= 1.0:
+            parser.error("--confidence_threshold must be between 0 and 1")
 
     constrained = "constrained" if not args.unconstrained else "unconstrained"
     args.output_path = os.path.join(args.output_path, "wav2vec", args.method)
     args.output_path = os.path.join(args.output_path, constrained) if args.method == "wfst" else args.output_path
+    if args.confidence_threshold is not None:
+        args.output_path = os.path.join(args.output_path, f"conf_{args.confidence_threshold}")
 
     os.makedirs(args.output_path, exist_ok=True)
 
