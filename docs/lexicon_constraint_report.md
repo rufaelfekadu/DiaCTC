@@ -82,7 +82,7 @@ This led to two design choices: restrict the stem only, and make the constraint 
 
 ## How the decoder uses the lexicon
 
-The change is in `build_pattern_fsa` in `src/diactc/models/base.py`. An animated walk-through on the word `كتب` is in [lexicon_decoding_illustration.html](lexicon_decoding_illustration.html); open it in a browser.
+The change is in `build_pattern_fsa` in `src/diactc/models/base.py`. Two real cases, one word the lexicon fixed and one it broke, are animated with the model's actual scores in [lexicon_decoding_illustration.html](lexicon_decoding_illustration.html), together with the fixed and broken word counts; open it in a browser.
 
 **Without a lexicon**, each word in the pattern graph is a straight chain: a letter, then a slot offering every allowed diacritic, then the next letter. All arcs cost nothing, so the audio alone decides.
 
