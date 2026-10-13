@@ -15,6 +15,7 @@ from pyarabic import araby
 from jiwer import wer as wer_fn, cer as cer_fn
 
 from diactc.models import Wav2Vec2DiacritizationModel
+from diactc.lexicon import DiacritizationLexicon
 from diactc.utils.text import preprocess_text
 from diactc.metrics import calculate_der, diac_coverage_rate
 
@@ -101,6 +102,8 @@ def pred_manifest(args, model, manifest_path):
         "dataset": dataset_name,
         "constrained": not args.unconstrained,
         "confidence_threshold": args.confidence_threshold,
+        "lexicon": args.lexicon,
+        "lexicon_weight": args.lexicon_weight if args.lexicon else None,
         "device": args.device,
     }
 
@@ -144,6 +147,8 @@ def main(args):
         use_blank_token=args.use_blank_token,
         use_no_diac_token=args.use_no_diac_token,
         use_unk_diac_token=args.use_unk_diac_token,
+        lexicon=DiacritizationLexicon.from_file(args.lexicon) if args.lexicon else None,
+        lexicon_weight=args.lexicon_weight,
     )
     model.to(args.device)
     for manifest in args.manifest_paths:
@@ -163,7 +168,15 @@ if __name__ == "__main__":
     parser.add_argument("--use_no_diac_token", action="store_true", help="Use no diac token if set.")
     parser.add_argument("--use_unk_diac_token", action="store_true", help="Use unk diac token if set.")
     parser.add_argument("--confidence_threshold", type=float, default=None, help="wfst only: predict no diacritic where the posterior of the decoded diacritic is below this value (0-1).")
+    parser.add_argument("--lexicon", type=str, default=None, help="wfst only: pronunciation lexicon (Buckwalter word followed by its phones) used to guide the diacritics of known words.")
+    parser.add_argument("--lexicon_weight", type=float, default=1.0, help="Cost of decoding a known word outside its lexicon variants.")
     args = parser.parse_args()
+
+    if args.lexicon is not None:
+        if args.method != "wfst" or args.unconstrained:
+            parser.error("--lexicon is only supported with constrained --method wfst")
+        if args.lexicon_weight < 0:
+            parser.error("--lexicon_weight must not be negative")
 
     if args.confidence_threshold is not None:
         if args.method != "wfst":
@@ -176,6 +189,8 @@ if __name__ == "__main__":
     args.output_path = os.path.join(args.output_path, constrained) if args.method == "wfst" else args.output_path
     if args.confidence_threshold is not None:
         args.output_path = os.path.join(args.output_path, f"conf_{args.confidence_threshold}")
+    if args.lexicon is not None:
+        args.output_path = os.path.join(args.output_path, f"lex_{args.lexicon_weight}")
 
     os.makedirs(args.output_path, exist_ok=True)
 

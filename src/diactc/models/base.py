@@ -3,6 +3,8 @@ import k2
 import torch
 
 from diactc.config import WILDCARD_TOKEN, NO_DIAC_TOKEN, UNK_DIAC_TOKEN, UNK_TOKEN
+from diactc.lexicon import allowed_diacritics
+from diactc.utils.text import MERGED_DIAC_TO_TOKEN_MAP
 
 
 class DiacritizationModel(ABC):
@@ -51,6 +53,11 @@ class DiacritizationModel(ABC):
     def build_pattern_fsa(self, pattern, constrained=True):
         '''
         Build pattern FSA.
+
+        If the model has a lexicon and a positive lexicon_weight, a word the lexicon
+        knows can be decoded through its lexicon variants at no cost, while decoding
+        it freely costs lexicon_weight. The last letter of a word carries the case
+        ending and is never restricted.
         Args:
             pattern: pattern to build
             wildcard_ids: wildcard ids
@@ -60,30 +67,102 @@ class DiacritizationModel(ABC):
         '''
         wildcard_ids = self.constrained_wildcard_ids if constrained else self.unconstrained_wildcard_ids
         token2id = self.token2id
+        num_tokens = len(token2id)
+        lexicon = getattr(self, 'lexicon', None)
+        lexicon_weight = getattr(self, 'lexicon_weight', 0.0)
         arcs = []
+        lexicon_arcs = []
+
+        def add_arc(arcs, src, dst, position, tid, cost=0.0):
+            # pattern_arc identifies the (pattern position, token) pair an arc stands for, so that
+            # lattice arcs can be traced back to it through compose/intersect (0 = none)
+            pattern_arc = 1 + position * num_tokens + tid
+            is_wildcard = int(pattern[position] == WILDCARD_TOKEN)
+            arcs.append(f"{src} {dst} {tid} {tid} {pattern_arc} {is_wildcard} {cost}")
+
+        def letter_id(ch):
+            return token2id[ch] if ch in token2id else token2id[UNK_TOKEN]
+
+        # paths through the lexicon variants of each known word, as a trie over the vowel classes of its letters
+        penalized_positions = set()
+        next_state = len(pattern) + 1
+        if lexicon is not None and lexicon_weight > 0 and constrained:
+            for start, end in self._word_spans(pattern):
+                letters = [pattern[i] for i in range(start, end, 2)]
+                is_diacritizable = end - start == 2 * len(letters) and all(pattern[i] == WILDCARD_TOKEN for i in range(start + 1, end, 2))
+                if len(letters) < 2 or not is_diacritizable or WILDCARD_TOKEN in letters:
+                    continue
+                stems = {variant[:-1] for variant in lexicon.variants("".join(letters)) if len(variant) == len(letters)}
+                if not stems:
+                    continue
+
+                penalized_positions.add(start)
+                # states before / after a letter, by the vowel classes of the letters before it
+                before_letter_state = {(): start}
+                after_letter_state = {}
+                for stem in sorted(stems):
+                    for k, ch in enumerate(letters):
+                        prefix = stem[:k]
+                        position = start + 2 * k
+                        if prefix not in after_letter_state:
+                            after_letter_state[prefix] = next_state
+                            next_state += 1
+                            add_arc(lexicon_arcs, before_letter_state[prefix], after_letter_state[prefix], position, letter_id(ch))
+                            if k == len(letters) - 1:
+                                for wid in wildcard_ids:
+                                    add_arc(lexicon_arcs, after_letter_state[prefix], end, position + 1, wid)
+                        if k < len(stem) and stem[:k + 1] not in before_letter_state:
+                            before_letter_state[stem[:k + 1]] = next_state
+                            next_state += 1
+                            for wid in self._class_token_ids(stem[k], wildcard_ids):
+                                add_arc(lexicon_arcs, after_letter_state[prefix], before_letter_state[stem[:k + 1]], position + 1, wid)
+
         state = 0
         for i, ch in enumerate(pattern):
             if ch == WILDCARD_TOKEN:
                 for wid in wildcard_ids:
-                    arcs.append(f"{state} {state+1} {wid} {wid} 0.0")
+                    add_arc(arcs, state, state + 1, i, wid)
             else:
-                if ch not in token2id:
-                    arcs.append(f"{state} {state+1} {token2id[UNK_TOKEN]} {token2id[UNK_TOKEN]} 0.0")
-                else:
-                    tid = token2id[ch]
-                    arcs.append(f"{state} {state+1} {tid} {tid} 0.0")
+                # openfst format: the last column is a cost
+                add_arc(arcs, state, state + 1, i, letter_id(ch), cost=lexicon_weight if i in penalized_positions else 0.0)
             state += 1
+        # openfst format: the source state of the first arc is the start state, so the lexicon arcs come last
+        arcs.extend(lexicon_arcs)
         arcs.append(f"{state} 0.0")
         txt = "\n".join(arcs)
-        fsa = k2.Fsa.from_str(txt, acceptor=False, openfst=True)
-
-        # Arc attributes that k2 carries through compose/intersect, so that lattice arcs
-        # can be traced back to the pattern arc they came from (0 = no pattern arc).
-        wildcard_states = torch.tensor([i for i, ch in enumerate(pattern) if ch == WILDCARD_TOKEN], dtype=torch.int32)
-        fsa.pattern_arc = torch.arange(1, fsa.num_arcs + 1, dtype=torch.int32)
-        fsa.is_wildcard = torch.isin(fsa.arcs.values()[:, 0], wildcard_states).to(torch.int32)
+        fsa = k2.Fsa.from_str(txt, aux_label_names=['aux_labels', 'pattern_arc', 'is_wildcard'], openfst=True)
+        # the final arc carries -1 in every label
+        fsa.pattern_arc = fsa.pattern_arc.clamp(min=0)
+        fsa.is_wildcard = fsa.is_wildcard.clamp(min=0)
 
         return k2.arc_sort(fsa), txt
+
+    def _word_spans(self, pattern):
+        '''
+        Yield the (start, end) positions of each word of the pattern.
+        '''
+        start = 0
+        for i, ch in enumerate(pattern):
+            if ch == self.word_delimiter_token:
+                if i > start:
+                    yield start, i
+                start = i + 1
+        if len(pattern) > start:
+            yield start, len(pattern)
+
+    def _class_token_ids(self, cls, wildcard_ids):
+        '''
+        Wildcard ids a letter of the given lexicon vowel class may be followed by.
+        '''
+        token2id = self.token2id
+        # blank and the tokens that stand for no / unknown diacritic are always allowed
+        allowed = {0} | {token2id[t] for t in (NO_DIAC_TOKEN, UNK_DIAC_TOKEN) if t in token2id}
+        for diacritics in allowed_diacritics(cls):
+            for token in (diacritics, MERGED_DIAC_TO_TOKEN_MAP.get(diacritics)):
+                if token in token2id:
+                    allowed.add(token2id[token])
+
+        return [wid for wid in wildcard_ids if wid in allowed]
 
     def _wfst_lattice(self, logits, pattern, constrained, search_beam, output_beam, min_active_states, max_active_states):
         fsa, _ = self.build_pattern_fsa(pattern, constrained=constrained)
