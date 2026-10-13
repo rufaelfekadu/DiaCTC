@@ -29,7 +29,7 @@ class Wav2Vec2DiacritizationModel(DiacritizationModel):
     - diacritize wfst
     '''
 
-    def __init__(self, model_name, device="cpu", use_blank_token=True, use_no_diac_token=True, use_unk_diac_token=True):
+    def __init__(self, model_name, device="cpu", use_blank_token=True, use_no_diac_token=True, use_unk_diac_token=True, lexicon=None, lexicon_weight=0.0):
         self.model_name = model_name
         self.processor = Wav2Vec2Processor.from_pretrained(model_name)
         self.sr = self.processor.feature_extractor.sampling_rate or 16000
@@ -38,6 +38,9 @@ class Wav2Vec2DiacritizationModel(DiacritizationModel):
         self.use_blank_token = use_blank_token
         self.use_no_diac_token = use_no_diac_token
         self.use_unk_diac_token = use_unk_diac_token
+        # optional DiacritizationLexicon; decoding a known word outside its lexicon variants costs lexicon_weight
+        self.lexicon = lexicon
+        self.lexicon_weight = lexicon_weight
         self.to(self.device)
         self.model.eval()
 

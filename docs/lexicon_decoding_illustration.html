@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; } body { margin: 0; }</style>
+<title>Lexicon-Guided Decoding</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Naskh+Arabic:wght@500&display=swap">
+<style>
+/* Layout: one reading column in three parts: how it works, two worked examples with live graphs, results on the test sets. */
+:root {
+  --bg: #f3f5f7; --surface: #ffffff; --fg: #15202b; --muted: #5a6775; --line: #c9d1da;
+  --accent: #0a7c76; --accent-soft: #d5efec; --warn: #b4550c; --warn-soft: #fbe7d5;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-ar: 'Noto Naskh Arabic', 'Geeza Pro', 'Segoe UI', 'Times New Roman', serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --surface: #19212a; --fg: #e7ecf1; --muted: #9aa8b6; --line: #33404d;
+    --accent: #45c4ba; --accent-soft: #123f3c; --warn: #f1a35a; --warn-soft: #452e10; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --fg: #e7ecf1; --muted: #9aa8b6; --line: #33404d;
+  --accent: #45c4ba; --accent-soft: #123f3c; --warn: #f1a35a; --warn-soft: #452e10; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.page { max-width: 880px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 56px; display: flex; flex-direction: column; gap: 44px; }
+h1 { font-size: 32px; line-height: 1.15; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 23px; line-height: 1.2; font-weight: 600; margin: 0; text-wrap: balance; padding-top: 20px; border-top: 1px solid var(--line); }
+h3 { font-size: 16.5px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 66ch; }
+header { display: flex; flex-direction: column; gap: 12px; }
+.part { display: flex; flex-direction: column; gap: 26px; }
+.block { display: flex; flex-direction: column; gap: 12px; }
+.word { font-family: var(--font-ar); font-size: 1.45em; line-height: 1; }
+.mono, code { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.93em; }
+.lede { color: var(--muted); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.toc a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.toc a:hover { text-decoration: underline; }
+ol, ul { margin: 0; padding-left: 22px; max-width: 66ch; display: flex; flex-direction: column; gap: 6px; }
+pre { margin: 0; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; }
+
+.sentence { font-family: var(--font-ar); font-size: 27px; line-height: 2; padding: 10px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.sentence mark { background: var(--accent-soft); color: var(--fg); border-radius: 6px; padding: 0 6px; }
+.source { color: var(--muted); font-size: 13.5px; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+th { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+td .gloss { color: var(--muted); }
+table.narrow { width: auto; min-width: 0; }
+tr.win td { background: var(--accent-soft); }
+tr.win td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.pending { opacity: 0.18; }
+tr { transition: opacity 0.25s; }
+td.cost-on { color: var(--warn); }
+.tag { font: 500 12.5px var(--font-body); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.tag.ok { background: var(--accent-soft); color: var(--fg); }
+.tag.bad { background: var(--warn-soft); color: var(--fg); }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: 500 14px var(--font-body); color: var(--muted); background: transparent; border: 0; padding: 8px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); }
+.weight { display: flex; align-items: center; gap: 10px; flex: 1 1 240px; min-width: 0; }
+.weight label { font-weight: 500; white-space: nowrap; }
+.weight output { font-family: var(--font-mono); font-variant-numeric: tabular-nums; display: inline-block; min-width: 2.8em; }
+.weight input { flex: 1 1 auto; min-width: 80px; accent-color: var(--accent); }
+#play { font: 600 14px var(--font-body); color: var(--bg); background: var(--accent); border: 0; border-radius: 8px; padding: 9px 18px; cursor: pointer; }
+#play:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 680px; height: auto; }
+figcaption { padding: 10px 16px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+.outcome { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+.outcome .label { color: var(--muted); }
+.verdict { max-width: 70ch; }
+.notes { color: var(--muted); font-size: 13.5px; display: flex; flex-direction: column; gap: 8px; }
+
+.split { display: flex; flex-direction: column; gap: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.split-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px 14px; align-items: center; }
+.split-name { font-weight: 500; }
+.bar3 { display: flex; gap: 2px; height: 14px; }
+.bar3 span { display: block; min-width: 3px; border-radius: 3px; }
+.seg-fixed { background: var(--accent); }
+.seg-same { background: var(--line); }
+.seg-broken { background: var(--warn); }
+.split-legend { grid-column: 2; color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+
+/* graphs */
+.edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.edge.win { stroke: var(--accent); stroke-width: 3; }
+.edge.pen { stroke: var(--warn); stroke-dasharray: 5 4; }
+.edge.pen.win { stroke: var(--accent); stroke-dasharray: none; }
+.trace { fill: none; stroke-linecap: round; }
+.trace.probe { stroke: var(--muted); stroke-width: 3; }
+.trace.final { stroke: var(--accent); stroke-width: 3.5; }
+.node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.node.free rect { stroke-dasharray: 3 3; }
+.node.win rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
+.node .glyph { font-family: var(--font-ar); font-size: 20px; fill: var(--fg); }
+.node .lat { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+.node .vow { font-family: var(--font-body); font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+.node .prob { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+.node .bar { fill: var(--muted); stroke: none; }
+.node.win .bar { fill: var(--accent); }
+.dot { fill: var(--fg); }
+.lane { font-family: var(--font-body); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; fill: var(--muted); }
+.lane.pen { fill: var(--warn); }
+.sep { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; fill: none; }
+.d-box { fill: var(--bg); stroke: var(--line); stroke-width: 1.2; }
+.d-box.d-pen { stroke: var(--warn); stroke-dasharray: 5 4; }
+.d-line { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.d-line.d-dash { stroke: var(--warn); stroke-dasharray: 5 4; }
+.d-head { fill: var(--muted); }
+.d-label { font-family: var(--font-body); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.d-small { font-family: var(--font-body); font-size: 12px; fill: var(--muted); }
+.d-small.d-warn { fill: var(--warn); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header>
+    <h1>Lexicon-guided decoding</h1>
+    <p>DiaCTC restores Arabic diacritics by choosing a mark for each letter from the audio. A pronunciation lexicon can guide that choice: readings the lexicon lists are free, and anything else costs a penalty.</p>
+    <p class="lede">This page explains the mechanism, walks through one word it fixed and one it broke, and reports the results on CLArTTS and ArVoice.</p>
+    <nav class="toc" aria-label="Contents">
+      <a href="#how-it-works">How it works</a>
+      <a href="#examples">Two real examples</a>
+      <a href="#results">Results</a>
+    </nav>
+  </header>
+
+  <section class="part" id="how-it-works" aria-labelledby="h-how">
+    <h2 id="h-how">How it works</h2>
+
+    <div class="block">
+      <h3>The idea</h3>
+      <p>Arabic is normally written without its short vowels, so the letters k-t-b can be read <em>kataba</em> ("he wrote"), <em>kutiba</em> ("it was written") or <em>kutub</em> ("books"). The decoder already knows the letters. Its job is to pick the mark that follows each one.</p>
+      <p>Without a lexicon, each word is one chain of letters, and after every letter the decoder may take any mark. The audio alone decides, so it can produce a combination that is not a word.</p>
+      <p>With a lexicon, each known word gets a second set of paths that spell only the readings the lexicon lists. Those paths are free. The original chain stays, but using it costs the lexicon weight.</p>
+      <figure>
+        <svg viewBox="0 0 700 176" role="img" aria-label="A word can be decoded through lexicon paths at no cost, or through the original free path at the cost of the lexicon weight.">
+          <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" class="d-head"/></marker></defs>
+          <circle cx="40" cy="88" r="5" class="dot"/>
+          <text x="40" y="112" class="d-small" text-anchor="middle">word starts</text>
+          <rect x="170" y="20" width="360" height="56" rx="10" class="d-box"/>
+          <text x="350" y="44" class="d-label" text-anchor="middle">Lexicon paths: one per listed reading</text>
+          <text x="350" y="62" class="d-small" text-anchor="middle">only that reading's vowels · cost 0</text>
+          <rect x="170" y="100" width="360" height="56" rx="10" class="d-box d-pen"/>
+          <text x="350" y="124" class="d-label" text-anchor="middle">Free path: the original chain</text>
+          <text x="350" y="142" class="d-small d-warn" text-anchor="middle">any mark on every letter · cost = lexicon weight</text>
+          <path d="M46,86 C110,86 110,48 164,48" class="d-line" marker-end="url(#arr)"/>
+          <path d="M46,90 C110,90 110,128 164,128" class="d-line d-dash" marker-end="url(#arr)"/>
+          <path d="M530,48 C596,48 596,86 648,86" class="d-line" marker-end="url(#arr)"/>
+          <path d="M530,128 C596,128 596,90 648,90" class="d-line d-dash" marker-end="url(#arr)"/>
+          <circle cx="660" cy="88" r="5" class="dot"/>
+          <text x="660" y="112" class="d-small" text-anchor="middle">word ends</text>
+        </svg>
+        <figcaption>Every known word is decoded through one of these two routes. A reading the lexicon lists never needs the free path; an unlisted one always does.</figcaption>
+      </figure>
+    </div>
+
+    <div class="block">
+      <h3>The steps</h3>
+      <ol>
+        <li><strong>Look the word up.</strong> The lexicon gives phoneme sequences for an undiacritized word. Each sequence is aligned to the word's letters, which yields one vowel per letter: none, a, i, u, or one of the word-final "-n" endings (an, in, un).</li>
+        <li><strong>Build the lexicon paths.</strong> One path per listed reading, sharing their common beginnings. After each letter the path offers only that reading's vowel.</li>
+        <li><strong>Charge the free path.</strong> The first step of the original chain for that word carries the weight, so it is paid once per word however many letters differ.</li>
+        <li><strong>Decode.</strong> The path with the highest total over the whole sentence wins.</li>
+      </ol>
+    </div>
+
+    <div class="block">
+      <h3>What the weight means</h3>
+      <p>Scores are natural-log probabilities, so a weight of <em>w</em> means an unlisted reading wins only if the audio makes it e<sup><em>w</em></sup> times more likely than the best listed one.</p>
+      <div class="table-wrap">
+        <table class="narrow">
+          <thead><tr><th class="num">Weight</th><th>Audio must favour the unlisted reading by</th></tr></thead>
+          <tbody>
+            <tr><td class="num">0.5</td><td>about 1.6 times</td></tr>
+            <tr><td class="num">1</td><td>about 2.7 times</td></tr>
+            <tr><td class="num">2</td><td>about 7.4 times</td></tr>
+            <tr><td class="num">4</td><td>about 55 times</td></tr>
+            <tr><td class="num">8</td><td>about 3,000 times</td></tr>
+            <tr><td class="num">1000</td><td>effectively never: a hard constraint</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A weight of 0 builds no lexicon paths, so decoding is identical to running without the lexicon.</p>
+    </div>
+
+    <div class="block">
+      <h3>What is never restricted</h3>
+      <ul>
+        <li><strong>The last letter of a word.</strong> It carries the case ending, and the lexicon is missing many of those.</li>
+        <li><strong>Shadda.</strong> The lexicon does not mark doubled consonants, so shadda is always optional.</li>
+        <li><strong>"No mark".</strong> Leaving a letter without a diacritic is always allowed.</li>
+        <li><strong>Words the lexicon does not know</strong>, and one-letter words. They get no lexicon paths and no penalty.</li>
+      </ul>
+    </div>
+
+    <div class="block">
+      <h3>How a path is scored</h3>
+      <p>The model gives every 20 ms frame of audio a probability for each token: the letters, the marks, and a blank. A path assigns one token to each frame, and its audio score is the sum of the log-probabilities it picks up. Logs of probabilities are negative, so the score closest to zero is best.</p>
+      <p>The total is the audio score minus any lexicon cost. Scores cover the whole sentence, so only the difference between two readings of a word matters.</p>
+    </div>
+
+    <div class="block">
+      <h3>Using it</h3>
+      <pre>python scripts/inference.py \
+    --model_path rufaelfekadu/diactc-combined \
+    --manifest_paths &lt;manifest.json&gt; \
+    --method wfst \
+    --use_blank_token --use_no_diac_token --use_unk_diac_token \
+    --lexicon ar-ar_lexicon_2014-03-17.txt --lexicon_weight 2.0</pre>
+      <p class="source">The lexicon is the QCRI <code>ar-ar_lexicon_2014-03-17.txt</code>: 526,119 words in Buckwalter transliteration, each with one or more phoneme sequences. Conversion and alignment are in <code>src/diactc/lexicon.py</code>; the graph is built in <code>build_pattern_fsa</code> in <code>src/diactc/models/base.py</code>.</p>
+    </div>
+  </section>
+
+  <section class="part" id="examples" aria-labelledby="h-examples">
+    <h2 id="h-examples">Two real examples</h2>
+    <p>Both words come from the test sets, decoded by <span class="mono">diactc-combined</span>. Every probability and score is from the real run. The mechanism is the same in both; what differs is whether the lexicon lists the form that was spoken.</p>
+
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Example">
+        <button type="button" id="case-fixed" aria-pressed="true">Fixed: muniʿa</button>
+        <button type="button" id="case-broken" aria-pressed="false">Broken: wafqa</button>
+      </div>
+      <div class="weight">
+        <label for="weight">Lexicon weight <output id="weight-out" for="weight">2.00</output></label>
+        <input type="range" id="weight" min="0" max="4" step="0.05" value="2">
+      </div>
+      <button type="button" id="play">Play</button>
+    </div>
+
+    <div class="block">
+      <h3>The sentence</h3>
+      <div class="sentence" lang="ar" dir="rtl" id="sentence"></div>
+      <p class="source" id="source"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Version</th><th>Word</th><th>Reads as</th><th>Result</th></tr></thead>
+          <tbody id="versions"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3>Without the lexicon</h3>
+      <p class="lede" id="lede-without"></p>
+      <figure>
+        <svg id="g-without" viewBox="0 0 716 190" role="img" aria-label="One chain of three letters. After each letter the model's most probable mark is chosen."></svg>
+        <figcaption>The number in each slot is the model's probability for that mark on that letter, summed over all alignments of the audio. Marks below 0.01 are not drawn.</figcaption>
+      </figure>
+      <div class="outcome">
+        <span class="label">Decoded</span>
+        <span class="word" lang="ar" dir="rtl" id="out-without-ar"></span>
+        <span class="mono" id="out-without-lat"></span>
+        <span class="tag" id="out-without-tag"></span>
+      </div>
+    </div>
+
+    <div class="block">
+      <h3>With the lexicon</h3>
+      <p class="lede" id="lede-with"></p>
+      <figure>
+        <svg id="g-with" viewBox="0 0 716 338" role="img" aria-label="The lexicon's readings as no-cost paths, and below them the free path, which pays the lexicon weight."></svg>
+        <figcaption id="cap-with"></figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Path</th><th>Reading</th><th class="num">Audio score</th><th class="num">Gap to best</th><th class="num">Lexicon cost</th><th class="num">Total</th></tr></thead>
+          <tbody id="ledger"></tbody>
+        </table>
+      </div>
+      <div class="outcome">
+        <span class="label">Decoded</span>
+        <span class="word" lang="ar" dir="rtl" id="out-with-ar"></span>
+        <span class="mono" id="out-with-lat"></span>
+        <span class="tag" id="out-with-tag"></span>
+      </div>
+      <p class="verdict" id="verdict"></p>
+    </div>
+
+    <div class="block">
+      <h3>Reading the scores</h3>
+      <p id="score-a"></p>
+      <p id="score-b"></p>
+      <div class="notes" id="notes"></div>
+    </div>
+  </section>
+
+  <section class="part" id="results" aria-labelledby="h-results">
+    <h2 id="h-results">Results on CLArTTS and ArVoice</h2>
+    <p>Model <span class="mono">rufaelfekadu/diactc-combined</span>, constrained WFST decoding, on the CLArTTS test set (205 utterances, 1,694 words) and the ArVoice test set (248 utterances of human speech, 4,914 words).</p>
+
+    <div class="block">
+      <h3>Words fixed and broken at weight 2</h3>
+      <p class="lede">The lexicon changed 142 of the 6,608 words. It fixed about twice as many as it broke, and more than half of the words it touched were wrong before and after.</p>
+      <div class="split" role="img" aria-label="Of the words the lexicon changed: CLArTTS 4 fixed, 6 wrong before and after, 2 broken. ArVoice 38 fixed, 74 wrong before and after, 18 broken.">
+        <div class="split-row">
+          <span class="split-name">CLArTTS</span>
+          <div class="bar3"><span class="seg-fixed" style="flex: 4 1 0"></span><span class="seg-same" style="flex: 6 1 0"></span><span class="seg-broken" style="flex: 2 1 0"></span></div>
+          <div class="split-legend"><span><span class="key seg-fixed"></span>4 fixed</span><span><span class="key seg-same"></span>6 wrong before and after</span><span><span class="key seg-broken"></span>2 broken</span></div>
+        </div>
+        <div class="split-row">
+          <span class="split-name">ArVoice</span>
+          <div class="bar3"><span class="seg-fixed" style="flex: 38 1 0"></span><span class="seg-same" style="flex: 74 1 0"></span><span class="seg-broken" style="flex: 18 1 0"></span></div>
+          <div class="split-legend"><span><span class="key seg-fixed"></span>38 fixed</span><span><span class="key seg-same"></span>74 wrong before and after</span><span><span class="key seg-broken"></span>18 broken</span></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Dataset</th><th class="num">Words</th><th class="num">In the lexicon</th><th class="num">Changed</th><th class="num">Fixed</th><th class="num">Broken</th><th class="num">Net</th></tr></thead>
+          <tbody>
+            <tr><td>CLArTTS</td><td class="num">1,694</td><td class="num">95.1%</td><td class="num">12</td><td class="num">4</td><td class="num">2</td><td class="num">+2</td></tr>
+            <tr><td>ArVoice</td><td class="num">4,914</td><td class="num">98.5%</td><td class="num">130</td><td class="num">38</td><td class="num">18</td><td class="num">+20</td></tr>
+            <tr><td>Both</td><td class="num">6,608</td><td class="num">97.6%</td><td class="num">142</td><td class="num">42</td><td class="num">20</td><td class="num">+22</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="source">Each bar is the set of words the lexicon changed. A word counts as fixed or broken on an exact match with the reference, case ending included.</p>
+    </div>
+
+    <div class="block">
+      <h3>Error rates by weight</h3>
+      <p class="lede">The same trade measured over every diacritic. A weight of 2 is the best setting for ArVoice and makes no real difference on CLArTTS; from 8 upward the broken words outweigh the fixed ones.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Lexicon weight</th><th class="num">CLArTTS DER</th><th class="num">CLArTTS WER</th><th class="num">ArVoice DER</th><th class="num">ArVoice WER</th></tr></thead>
+          <tbody>
+            <tr><td>none</td><td class="num">3.80</td><td class="num">13.05%</td><td class="num">8.69</td><td class="num">30.36%</td></tr>
+            <tr><td>0.5</td><td class="num">3.79</td><td class="num">12.99%</td><td class="num">8.61</td><td class="num">30.10%</td></tr>
+            <tr><td>1</td><td class="num">3.76</td><td class="num">12.81%</td><td class="num">8.55</td><td class="num">30.08%</td></tr>
+            <tr class="win"><td>2</td><td class="num">3.78</td><td class="num">12.93%</td><td class="num">8.51</td><td class="num">29.96%</td></tr>
+            <tr><td>4</td><td class="num">3.78</td><td class="num">12.99%</td><td class="num">8.52</td><td class="num">29.98%</td></tr>
+            <tr><td>8</td><td class="num">4.28</td><td class="num">14.82%</td><td class="num">8.74</td><td class="num">30.65%</td></tr>
+            <tr><td>1000</td><td class="num">4.99</td><td class="num">16.65%</td><td class="num">8.79</td><td class="num">30.75%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="source">DER is the diacritic error rate with case endings; WER is the word error rate on the diacritized text.</p>
+    </div>
+
+    <div class="block">
+      <h3>What to take from it</h3>
+      <ul>
+        <li><strong>Use a weight around 2 for ArVoice-like text.</strong> It lowers DER by about 0.2 points there. Any weight from 0.5 to 4 is at least as good as no lexicon on both sets.</li>
+        <li><strong>Do not use it as a hard constraint.</strong> At weight 1000, DER rises from 3.80 to 4.99 on CLArTTS, because correct forms the lexicon lacks are overridden.</li>
+        <li><strong>The ceiling is low.</strong> The lexicon cannot tell a non-word from a real form it is missing, and it leaves case endings alone, which is where many of the remaining errors are.</li>
+        <li><strong>The weight was tuned on the test sets</strong>, since neither dataset has a dev split, so the gain is an optimistic estimate.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var MARK = { a: 'َ', i: 'ِ', u: 'ُ', sukun: 'ْ', none: '' };
+  var AYN = 'ʿ', DASH = '–', MINUS = '−';
+
+  /* All probabilities and scores below are from real decoding runs of rufaelfekadu/diactc-combined. */
+  var CASES = {
+    fixed: {
+      sentence: ['فَإِنَّهُ إنْ ', 'مُنِعَ', ' فَعَمَّا لَا يَمْلِكُ وَإِنْ أُجِيبَ'],
+      source: 'CLArTTS test, utterance 142, 4.1 seconds. The highlighted word is spelled m-n-' + AYN + '.',
+      letters: [['م', 'm'], ['ن', 'n'], ['ع', AYN]],
+      versions: [
+        ['Reference', ['u', 'i'], 'muni' + AYN + 'a', 'was prevented', null],
+        ['Without lexicon', ['u', 'sukun'], 'mun' + AYN + 'a', 'not a word', false],
+        ['With lexicon, weight 2', ['u', 'i'], 'muni' + AYN + 'a', 'was prevented', true]
+      ],
+      slots: [
+        [['u', 0.991], ['none', 0.008]],
+        [['sukun', 0.669], ['i', 0.316], ['a', 0.011]],
+        [['a', 0.752], ['none', 0.240]]
+      ],
+      ledeWithout: 'The model is sure of the u. On the second letter it leans toward "no vowel" (sukun) at 0.67, with the correct i at 0.32, and nothing stops it taking the favourite.',
+      ledeWith: 'The lexicon lists three readings of m-n-' + AYN + '. The model\'s favourite is not among them, so it has to take the free path and pay the weight. The listed reading muni' + AYN + DASH + ' trails it by only 0.75.',
+      capWith: 'The two readings starting with a share their first steps. The last letter\'s ending is left open on every path.',
+      spec: {
+        h: 338, sepY: 243, freeY: 268, s: [36, 168], e: [684, 168],
+        nodes: [
+          ['L', 'm', 110, 134, 0], ['C', 'v1a', 205, 78, 'a', 0.0005], ['C', 'v1u', 205, 190, 'u', 0.991],
+          ['L', 'nA', 300, 78, 1], ['L', 'nU', 300, 190, 1],
+          ['C', 'v2a', 395, 44, 'a', 0.011], ['C', 'v2s', 395, 112, 'sukun', 0.669], ['C', 'v2i', 395, 190, 'i', 0.316],
+          ['L', 'cA', 490, 44, 2], ['L', 'cB', 490, 112, 2], ['L', 'cC', 490, 190, 2],
+          ['C', 'eA', 585, 44, 'any', null], ['C', 'eB', 585, 112, 'any', null], ['C', 'eC', 585, 190, 'any', null],
+          ['L', 'mF', 110, 302, 0], ['C', 'f1', 205, 302, 'u', 0.991, true], ['L', 'nF', 300, 302, 1],
+          ['C', 'f2', 395, 302, 'sukun', 0.669, true], ['L', 'cF', 490, 302, 2], ['C', 'eF', 585, 302, 'any', null, true]
+        ],
+        edges: [['s', 'm'], ['m', 'v1a'], ['m', 'v1u'], ['v1a', 'nA'], ['v1u', 'nU'], ['nA', 'v2a'], ['nA', 'v2s'], ['nU', 'v2i'],
+          ['v2a', 'cA'], ['v2s', 'cB'], ['v2i', 'cC'], ['cA', 'eA'], ['cB', 'eB'], ['cC', 'eC'], ['eA', 'end'], ['eB', 'end'], ['eC', 'end']]
+      },
+      cands: [
+        { kind: 'lex', lat: 'mana' + AYN + DASH, gloss: 'he prevented', marks: ['a', 'a'], score: -33.832, ids: ['s', 'm', 'v1a', 'nA', 'v2a', 'cA', 'eA', 'end'] },
+        { kind: 'lex', lat: 'man' + AYN + DASH, gloss: 'prevention', marks: ['a', 'sukun'], score: -29.717, ids: ['s', 'm', 'v1a', 'nA', 'v2s', 'cB', 'eB', 'end'] },
+        { kind: 'lex', lat: 'muni' + AYN + DASH, gloss: 'was prevented', marks: ['u', 'i'], score: -24.126, ids: ['s', 'm', 'v1u', 'nU', 'v2i', 'cC', 'eC', 'end'] },
+        { kind: 'free', lat: 'mun' + AYN + DASH, gloss: 'not in the lexicon', marks: ['u', 'sukun'], score: -23.374, ids: ['s', 'mF', 'f1', 'nF', 'f2', 'cF', 'eF', 'end'] }
+      ],
+      ref: ['u', 'i'],
+      tailFree: 'The weight has to exceed 0.75 to fix this word.',
+      tailLex: 'The lexicon rules out a form that is not a word, and the spoken one is next in line.',
+      frames: '203', near: MINUS + '23',
+      gapNote: 'A gap of ' + MINUS + '0.75 means the audio finds muni' + AYN + DASH + ' about half as likely as mun' + AYN + DASH + ' (e to the ' + MINUS + '0.75 is 0.47), which matches the slot probabilities: 0.32 against 0.67.',
+      notes: [
+        'The lexicon fixes this word at any weight above 0.75, so the experiment\'s weights of 1, 2 and 4 all correct it and 0.5 does not.',
+        'One error in this sentence survives in both runs: the last letter of the sixth word. It is a case ending, which the lexicon deliberately leaves free.'
+      ]
+    },
+    broken: {
+      sentence: ['… الْمَسْؤُولَةِ عَنِ التَّغَيُّرِ الْمُنَاخِيِّ ', 'وَفْقَ', ' الْكَثِيرِينَ …'],
+      source: 'ArVoice test, utterance 37, 21.7 seconds; six of its 42 words shown. The highlighted word is spelled w-f-q.',
+      letters: [['و', 'w'], ['ف', 'f'], ['ق', 'q']],
+      versions: [
+        ['Reference', ['a', 'sukun'], 'wafqa', 'according to', null],
+        ['Without lexicon', ['a', 'sukun'], 'wafqa', 'according to', true],
+        ['With lexicon, weight 2', ['i', 'sukun'], 'wifqa', 'the only form the lexicon lists', false]
+      ],
+      slots: [
+        [['a', 0.431], ['none', 0.398], ['i', 0.169]],
+        [['sukun', 0.965], ['none', 0.015]],
+        [['a', 0.840], ['none', 0.105], ['i', 0.033]]
+      ],
+      ledeWithout: 'The first vowel is a close call: a at 0.43, no mark at 0.40, i at 0.17. The model takes a, which matches the reference.',
+      ledeWith: 'The lexicon lists a single reading of w-f-q, with i. The reference\'s wafq' + DASH + ' is missing, so the correct answer has to take the free path and pay the weight. It leads by only 0.93, less than the weight of 2.',
+      capWith: 'One lexicon path against the free path. The last letter\'s ending is left open on both.',
+      spec: {
+        h: 232, sepY: 131, freeY: 156, s: [36, 127], e: [684, 127],
+        nodes: [
+          ['L', 'wL', 110, 66, 0], ['C', 'v1i', 205, 66, 'i', 0.169], ['L', 'fL', 300, 66, 1],
+          ['C', 'v2s', 395, 66, 'sukun', 0.965], ['L', 'qL', 490, 66, 2], ['C', 'eL', 585, 66, 'any', null],
+          ['L', 'wF', 110, 194, 0], ['C', 'f1', 205, 194, 'a', 0.431, true], ['L', 'fF', 300, 194, 1],
+          ['C', 'f2', 395, 194, 'sukun', 0.965, true], ['L', 'qF', 490, 194, 2], ['C', 'eF', 585, 194, 'any', null, true]
+        ],
+        edges: [['s', 'wL'], ['wL', 'v1i'], ['v1i', 'fL'], ['fL', 'v2s'], ['v2s', 'qL'], ['qL', 'eL'], ['eL', 'end']]
+      },
+      cands: [
+        { kind: 'lex', lat: 'wifq' + DASH, gloss: 'the only listed form', marks: ['i', 'sukun'], score: -216.393, ids: ['s', 'wL', 'v1i', 'fL', 'v2s', 'qL', 'eL', 'end'] },
+        { kind: 'free', lat: 'wafq' + DASH, gloss: 'according to · not in the lexicon', marks: ['a', 'sukun'], score: -215.460, ids: ['s', 'wF', 'f1', 'fF', 'f2', 'qF', 'eF', 'end'] }
+      ],
+      ref: ['a', 'sukun'],
+      tailFree: 'Below a weight of 0.93 the lexicon leaves this word alone.',
+      tailLex: 'Here the audio was right, and the lexicon was missing the form.',
+      frames: '1,086', near: MINUS + '215',
+      gapNote: 'A gap of ' + MINUS + '0.93 means the audio finds wifq' + DASH + ' about 0.39 times as likely as wafq' + DASH + ' (e to the ' + MINUS + '0.93 is 0.39), which matches the slot probabilities: 0.17 against 0.43.',
+      notes: [
+        'The lexicon overrides this word at any weight above 0.93, so the experiment\'s weights of 1, 2 and 4 all break it and 0.5 does not.',
+        'This counts as an error against the reference. The lexicon has no entry for the form the speaker used, so it cannot tell a missing form from a wrong one.'
+      ]
+    }
+  };
+
+  var state = { key: 'fixed', w: 2 };
+  var runId = 0;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function $(id) { return document.getElementById(id); }
+  function el(name, attrs, parent, text) {
+    var e = document.createElementNS(SVGNS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function h(tag, cls, text, parent) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function fmt(x) { return (x < -0.004 ? MINUS : '') + Math.abs(x).toFixed(2); }
+  function prob(p) { return p < 0.005 ? '<.01' : p.toFixed(2).replace(/^0/, ''); }
+  function arabic(c, marks) { return c.letters[0][0] + MARK[marks[0]] + c.letters[1][0] + MARK[marks[1]] + c.letters[2][0] + MARK.a; }
+  function latin(cand) { return cand.lat.replace(DASH, 'a'); }
+  function same(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function compute() {
+    var c = CASES[state.key];
+    var free = c.cands[c.cands.length - 1];
+    var win = c.cands[0], lex = c.cands[0];
+    c.cands.forEach(function (d) {
+      d.cost = d.kind === 'free' ? state.w : 0;
+      d.gap = d.score - free.score;
+      d.total = d.score - d.cost;
+      if (d.total > win.total + 1e-9) win = d;
+      if (d.kind === 'lex' && d.score > lex.score) lex = d;
+    });
+    return { c: c, cands: c.cands, win: win, free: free, lex: lex };
+  }
+
+  /* ---- graph drawing ---- */
+  function Graph(svg) {
+    this.svg = svg;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    this.gE = el('g', {}, svg); this.gT = el('g', {}, svg); this.gN = el('g', {}, svg);
+    this.nodes = {}; this.edges = {};
+  }
+  Graph.prototype.dot = function (id, x, y) {
+    el('circle', { cx: x, cy: y, r: 5, 'class': 'dot' }, this.gN);
+    this.nodes[id] = { x: x, y: y, hw: 5, g: null };
+  };
+  Graph.prototype.letter = function (id, x, y, glyph, lat) {
+    var g = el('g', { 'class': 'node' }, this.gN);
+    el('rect', { x: x - 22, y: y - 23, width: 44, height: 46, rx: 8 }, g);
+    el('text', { x: x, y: y + 3, 'class': 'glyph', 'text-anchor': 'middle' }, g, glyph);
+    el('text', { x: x, y: y + 17, 'class': 'lat', 'text-anchor': 'middle' }, g, lat);
+    this.nodes[id] = { x: x, y: y, hw: 22, g: g };
+  };
+  Graph.prototype.chip = function (id, x, y, label, p, free) {
+    var g = el('g', { 'class': 'node' + (free ? ' free' : '') }, this.gN);
+    el('rect', { x: x - 42, y: y - 15, width: 84, height: 30, rx: 15 }, g);
+    if (p == null) {
+      el('text', { x: x, y: y + 4, 'class': 'vow', 'text-anchor': 'middle' }, g, label);
+    } else {
+      el('text', { x: x - 31, y: y + 3, 'class': 'vow' }, g, label);
+      el('text', { x: x + 33, y: y + 3, 'class': 'prob', 'text-anchor': 'end' }, g, prob(p));
+      el('rect', { 'class': 'bar', x: x - 31, y: y + 7.5, width: Math.max(2, 64 * p), height: 2.5, rx: 1.25 }, g);
+    }
+    this.nodes[id] = { x: x, y: y, hw: 42, g: g };
+  };
+  Graph.prototype.edge = function (a, b, cls) {
+    var A = this.nodes[a], B = this.nodes[b];
+    var x1 = A.x + A.hw, x2 = B.x - B.hw, mx = (x1 + x2) / 2;
+    var d = 'M' + x1 + ',' + A.y + ' C' + mx + ',' + A.y + ' ' + mx + ',' + B.y + ' ' + x2 + ',' + B.y;
+    this.edges[a + '>' + b] = el('path', { d: d, 'class': 'edge' + (cls ? ' ' + cls : '') }, this.gE);
+  };
+  Graph.prototype.chain = function (ids, cls) { for (var i = 0; i < ids.length - 1; i++) this.edge(ids[i], ids[i + 1], cls && i === 0 ? cls : ''); };
+  Graph.prototype.mark = function (ids) {
+    for (var i = 0; i < ids.length; i++) {
+      var n = this.nodes[ids[i]];
+      if (n && n.g) n.g.setAttribute('class', n.g.getAttribute('class') + ' win');
+      if (i < ids.length - 1) { var e = this.edges[ids[i] + '>' + ids[i + 1]]; if (e) e.setAttribute('class', e.getAttribute('class') + ' win'); }
+    }
+  };
+  Graph.prototype.trace = function (ids, cls, per) {
+    var made = [];
+    for (var i = 0; i < ids.length - 1; i++) {
+      var src = this.edges[ids[i] + '>' + ids[i + 1]];
+      if (!src) continue;
+      var p = el('path', { d: src.getAttribute('d'), 'class': 'trace ' + cls }, this.gT);
+      var len = p.getTotalLength();
+      p.style.strokeDasharray = len + ' ' + len;
+      p.style.strokeDashoffset = len;
+      if (p.animate) p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: per, delay: i * per, fill: 'forwards', easing: 'linear' });
+      else p.style.strokeDashoffset = 0;
+      made.push(p);
+    }
+    return sleep((ids.length - 1) * per).then(function () { return made; });
+  };
+
+  var WITHOUT_IDS = ['s', 'l0', 'v0_0', 'l1', 'v1_0', 'l2', 'v2_0', 'end'];
+
+  function drawWithout(c, highlight) {
+    var g = new Graph($('g-without'));
+    var letterX = [110, 300, 490], chipX = [205, 395, 585];
+    g.dot('s', 36, 95); g.dot('end', 684, 95);
+    c.letters.forEach(function (L, k) { g.letter('l' + k, letterX[k], 95, L[0], L[1]); });
+    c.slots.forEach(function (opts, k) {
+      var ys = opts.length === 2 ? [70, 120] : [45, 95, 145];
+      opts.forEach(function (o, j) { g.chip('v' + k + '_' + j, chipX[k], ys[j], o[0], o[1]); });
+    });
+    g.edge('s', 'l0');
+    c.slots.forEach(function (opts, k) {
+      var to = k < 2 ? 'l' + (k + 1) : 'end';
+      opts.forEach(function (o, j) { var id = 'v' + k + '_' + j; g.edge('l' + k, id); g.edge(id, to); });
+    });
+    if (highlight) g.mark(WITHOUT_IDS);
+    return g;
+  }
+
+  function drawWith(r, highlight) {
+    var c = r.c, sp = c.spec, svg = $('g-with');
+    svg.setAttribute('viewBox', '0 0 716 ' + sp.h);
+    var g = new Graph(svg);
+    el('text', { x: 88, y: 15, 'class': 'lane' }, g.gN, 'LEXICON PATHS · NO COST');
+    el('path', { d: 'M88,' + sp.sepY + ' L700,' + sp.sepY, 'class': 'sep' }, g.gE);
+    el('text', { x: 92, y: sp.freeY, 'class': 'lane pen' }, g.gN, 'COST ' + state.w.toFixed(2));
+    el('text', { x: 180, y: sp.freeY, 'class': 'lane' }, g.gN, 'FREE PATH · ANY MARK');
+    g.dot('s', sp.s[0], sp.s[1]); g.dot('end', sp.e[0], sp.e[1]);
+    sp.nodes.forEach(function (n) {
+      if (n[0] === 'L') g.letter(n[1], n[2], n[3], c.letters[n[4]][0], c.letters[n[4]][1]);
+      else g.chip(n[1], n[2], n[3], n[4], n[5], n[6]);
+    });
+    sp.edges.forEach(function (e) { g.edge(e[0], e[1]); });
+    g.chain(r.free.ids, 'pen');
+    if (highlight) g.mark(r.win.ids);
+    return g;
+  }
+
+  /* ---- text around the graphs ---- */
+  function setTag(node, ok) {
+    node.className = 'tag ' + (ok ? 'ok' : 'bad');
+    node.textContent = ok ? 'matches the reference' : 'not the reference';
+  }
+  function drawCaseText(c) {
+    var s = $('sentence');
+    s.textContent = '';
+    s.appendChild(document.createTextNode(c.sentence[0]));
+    h('mark', null, c.sentence[1], s);
+    s.appendChild(document.createTextNode(c.sentence[2]));
+    $('source').textContent = c.source;
+    var body = $('versions');
+    body.textContent = '';
+    c.versions.forEach(function (v) {
+      var tr = h('tr', null, null, body);
+      h('td', null, v[0], tr);
+      var w = h('span', 'word', arabic(c, v[1]), h('td', null, null, tr));
+      w.setAttribute('lang', 'ar'); w.setAttribute('dir', 'rtl');
+      var reads = h('td', null, null, tr);
+      h('span', 'mono', v[2], reads); h('span', 'gloss', ' · ' + v[3], reads);
+      var res = h('td', null, null, tr);
+      if (v[4] !== null) h('span', 'tag ' + (v[4] ? 'ok' : 'bad'), v[4] ? 'matches the reference' : 'wrong', res);
+    });
+    $('lede-without').textContent = c.ledeWithout;
+    $('lede-with').textContent = c.ledeWith;
+    $('cap-with').textContent = c.capWith;
+    $('score-a').textContent = 'This utterance has ' + c.frames + ' frames. The audio score is the best path for the whole sentence with this one word held to the reading, so every row is near ' +
+      c.near + ': most of it comes from the rest of the sentence and is the same in each.';
+    $('score-b').textContent = 'Only the differences matter, which is what "gap to best" shows. The free path is the unconstrained best, so its gap is 0.00 by definition. ' + c.gapNote;
+    var notes = $('notes');
+    notes.textContent = '';
+    c.notes.forEach(function (n) { h('p', null, n, notes); });
+  }
+  function drawLedger(r, shown, showWin) {
+    var body = $('ledger');
+    body.textContent = '';
+    r.cands.forEach(function (c, i) {
+      var tr = h('tr', i >= shown ? 'pending' : (showWin && c === r.win ? 'win' : ''), null, body);
+      h('td', null, c.kind === 'lex' ? 'Lexicon' : 'Free', tr);
+      var reading = h('td', null, null, tr);
+      h('span', 'mono', c.lat, reading); h('span', 'gloss', ' · ' + c.gloss, reading);
+      h('td', 'num', fmt(c.score), tr);
+      h('td', 'num', fmt(c.gap), tr);
+      h('td', 'num' + (c.cost ? ' cost-on' : ''), c.cost ? fmt(-c.cost) : '0', tr);
+      h('td', 'num', fmt(c.total), tr);
+    });
+  }
+  function drawText(r, final) {
+    var c = r.c;
+    $('weight-out').textContent = state.w.toFixed(2);
+    $('out-without-ar').textContent = final ? arabic(c, r.free.marks) : '';
+    $('out-without-lat').textContent = final ? latin(r.free) : '…';
+    $('out-with-ar').textContent = final ? arabic(c, r.win.marks) : '';
+    $('out-with-lat').textContent = final ? latin(r.win) : '…';
+    var t1 = $('out-without-tag'), t2 = $('out-with-tag');
+    t1.hidden = t2.hidden = !final;
+    setTag(t1, same(r.free.marks, c.ref));
+    setTag(t2, same(r.win.marks, c.ref));
+    var v = $('verdict');
+    if (!final) { v.textContent = ''; return; }
+    if (r.win.kind === 'free') {
+      v.textContent = 'At this weight the free path wins: ' + fmt(r.free.score) + ' ' + MINUS + ' ' + state.w.toFixed(2) + ' = ' + fmt(r.free.total) +
+        ', above ' + r.lex.lat + ' at ' + fmt(r.lex.total) + '. ' + c.tailFree;
+    } else {
+      v.textContent = r.win.lat + ' wins at ' + fmt(r.win.total) + '. The audio alone prefers ' + r.free.lat + ' (' + fmt(r.free.score) +
+        '), but after paying the weight that path scores ' + fmt(r.free.total) + '. ' + c.tailLex;
+    }
+  }
+
+  function renderStatic() {
+    var r = compute();
+    drawCaseText(r.c);
+    drawWithout(r.c, true); drawWith(r, true);
+    drawLedger(r, r.cands.length, true); drawText(r, true);
+  }
+
+  function play() {
+    if (reduceMotion) { renderStatic(); return; }
+    var my = ++runId;
+    var r = compute();
+    var btn = $('play');
+    btn.disabled = true;
+    var gA = drawWithout(r.c, false), gB = drawWith(r, false);
+    drawLedger(r, 0, false); drawText(r, false);
+    var alive = function () { return my === runId; };
+    gA.trace(WITHOUT_IDS, 'final', 190).then(function () {
+      if (!alive()) return;
+      gA.mark(WITHOUT_IDS);
+      var chain = Promise.resolve();
+      r.cands.forEach(function (c, i) {
+        chain = chain.then(function () {
+          if (!alive()) return;
+          return gB.trace(c.ids, 'probe', 130).then(function (made) {
+            if (!alive()) return;
+            drawLedger(r, i + 1, false);
+            return sleep(260).then(function () { made.forEach(function (p) { if (p.parentNode) p.parentNode.removeChild(p); }); });
+          });
+        });
+      });
+      return chain.then(function () {
+        if (!alive()) return;
+        return gB.trace(r.win.ids, 'final', 170);
+      });
+    }).then(function () {
+      if (!alive()) return;
+      renderStatic();
+      btn.disabled = false;
+    });
+  }
+
+  function change() { runId++; $('play').disabled = false; renderStatic(); }
+  ['fixed', 'broken'].forEach(function (key) {
+    $('case-' + key).addEventListener('click', function () {
+      state.key = key;
+      $('case-fixed').setAttribute('aria-pressed', String(key === 'fixed'));
+      $('case-broken').setAttribute('aria-pressed', String(key === 'broken'));
+      change();
+    });
+  });
+  $('weight').addEventListener('input', function (e) { state.w = parseFloat(e.target.value); change(); });
+  $('play').addEventListener('click', play);
+
+  renderStatic();
+})();
+</script>
+</body>
+</html>

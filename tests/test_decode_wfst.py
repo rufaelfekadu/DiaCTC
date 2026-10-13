@@ -10,7 +10,8 @@ import pytest
 k2 = pytest.importorskip("k2")
 import torch
 
-from diactc.config import NO_DIAC_TOKEN, PAD_TOKEN, WILDCARD_TOKEN
+from diactc.config import NO_DIAC_TOKEN, PAD_TOKEN, WILDCARD_TOKEN, WORD_DELIMITER_TOKEN
+from diactc.lexicon import DiacritizationLexicon
 from diactc.models.base import DiacritizationModel
 from diactc.utils.text import DAMMA, FATHA
 
@@ -34,6 +35,10 @@ class ToyModel(DiacritizationModel):
     @property
     def unconstrained_wildcard_ids(self):
         return list(self._token2id.values())
+
+    @property
+    def word_delimiter_token(self):
+        return WORD_DELIMITER_TOKEN
 
     def load_model(self):
         pass
@@ -105,3 +110,55 @@ class TestConfidenceThreshold:
         model = ToyModel([PAD_TOKEN, BA, FATHA, DAMMA, TA])
         decoded = model.decode_wfst(model.log_probs(FRAMES), PATTERN, confidence_threshold=0.8)
         assert tokens(model, decoded) == [BA, FATHA, TA]
+
+
+# The first diacritic is a fatha that damma nearly ties with; the lexicon only knows the word with a damma.
+LEXICON_FRAMES = [{BA: 1.0}, {FATHA: 0.55, DAMMA: 0.45}, {TA: 1.0}, {DAMMA: 1.0}]
+
+
+class TestLexicon:
+    @pytest.fixture
+    def lexicon(self):
+        return DiacritizationLexicon({"bt": [("b", "u", "t")]})
+
+    def decode(self, model, lexicon, weight, **kwargs):
+        model.lexicon, model.lexicon_weight = lexicon, weight
+        return tokens(model, model.decode_wfst(model.log_probs(LEXICON_FRAMES), PATTERN, **kwargs))
+
+    def test_without_lexicon(self, model):
+        assert self.decode(model, None, 0.0) == [BA, FATHA, TA, DAMMA]
+
+    def test_zero_weight_matches_no_lexicon(self, model, lexicon):
+        assert self.decode(model, lexicon, 0.0) == [BA, FATHA, TA, DAMMA]
+
+    def test_lexicon_variant_wins_when_the_weight_outweighs_the_margin(self, model, lexicon):
+        assert self.decode(model, lexicon, 5.0) == [BA, DAMMA, TA, DAMMA]
+
+    def test_acoustics_win_when_the_weight_is_below_the_margin(self, model, lexicon):
+        assert self.decode(model, lexicon, 0.05) == [BA, FATHA, TA, DAMMA]
+
+    def test_last_letter_is_not_restricted(self, model, lexicon):
+        # the lexicon variant ends without a vowel, the audio has a damma
+        assert self.decode(model, lexicon, 5.0)[-1] == DAMMA
+
+    def test_unknown_word_is_unconstrained(self, model):
+        lexicon = DiacritizationLexicon({"tb": [("t", "u", "b")]})
+        assert self.decode(model, lexicon, 5.0) == [BA, FATHA, TA, DAMMA]
+
+    def test_words_before_a_lexicon_word_are_kept(self, lexicon):
+        model = ToyModel([PAD_TOKEN, BA, FATHA, DAMMA, NO_DIAC_TOKEN, TA, WORD_DELIMITER_TOKEN])
+        model.lexicon, model.lexicon_weight = lexicon, 5.0
+        pattern = [TA, WILDCARD_TOKEN, WORD_DELIMITER_TOKEN] + PATTERN
+        frames = [{TA: 1.0}, {FATHA: 1.0}, {WORD_DELIMITER_TOKEN: 1.0}] + LEXICON_FRAMES
+        decoded = model.decode_wfst(model.log_probs(frames), pattern)
+        assert tokens(model, decoded) == [TA, FATHA, WORD_DELIMITER_TOKEN, BA, DAMMA, TA, DAMMA]
+
+    def test_unconstrained_decoding_ignores_the_lexicon(self, model, lexicon):
+        assert self.decode(model, lexicon, 5.0, constrained=False) == [BA, FATHA, TA, DAMMA]
+
+    def test_confidence_sums_over_lexicon_and_free_paths(self, model, lexicon):
+        model.lexicon, model.lexicon_weight = lexicon, 5.0
+        ids, confidences = model.decode_wfst_with_confidence(model.log_probs(LEXICON_FRAMES), PATTERN)
+        assert tokens(model, ids) == [BA, DAMMA, TA, DAMMA]
+        assert 0.9 < confidences[1] <= 1.0
+        assert 0.9 < confidences[3] <= 1.0
