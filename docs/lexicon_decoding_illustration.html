@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lexicon-Guided Decoding</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Naskh+Arabic:wght@500&display=swap">
+<style>
+/* Layout: one reading column; a control strip, then two stacked decoding graphs, each with its outcome beneath. */
+:root {
+  --bg: #f3f5f7; --surface: #ffffff; --fg: #15202b; --muted: #5a6775; --line: #c9d1da;
+  --accent: #0a7c76; --accent-soft: #d5efec; --warn: #b4550c; --warn-soft: #fbe7d5;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-ar: 'Noto Naskh Arabic', 'Geeza Pro', 'Segoe UI', 'Times New Roman', serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --surface: #19212a; --fg: #e7ecf1; --muted: #9aa8b6; --line: #33404d;
+    --accent: #45c4ba; --accent-soft: #123f3c; --warn: #f1a35a; --warn-soft: #452e10; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --fg: #e7ecf1; --muted: #9aa8b6; --line: #33404d;
+  --accent: #45c4ba; --accent-soft: #123f3c; --warn: #f1a35a; --warn-soft: #452e10; color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.page { max-width: 880px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 56px; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 30px; line-height: 1.15; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 18px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 66ch; }
+header { display: flex; flex-direction: column; gap: 12px; }
+.ar { font-family: var(--font-ar); }
+.word { font-family: var(--font-ar); font-size: 1.35em; line-height: 1; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: 500 14px var(--font-body); color: var(--muted); background: transparent; border: 0; padding: 8px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); }
+.weight { display: flex; align-items: center; gap: 10px; flex: 1 1 240px; min-width: 0; }
+.weight label { font-weight: 500; white-space: nowrap; }
+.weight output { font-family: var(--font-mono); font-variant-numeric: tabular-nums; display: inline-block; min-width: 2.4em; }
+.weight input { flex: 1 1 auto; min-width: 80px; accent-color: var(--accent); }
+#play { font: 600 14px var(--font-body); color: var(--bg); background: var(--accent); border: 0; border-radius: 8px; padding: 9px 18px; cursor: pointer; }
+#play:disabled { opacity: 0.55; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scenario-note { color: var(--muted); }
+
+section { display: flex; flex-direction: column; gap: 12px; }
+.lede { color: var(--muted); }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 660px; height: auto; }
+figcaption { padding: 10px 16px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+
+.outcome { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+.outcome .label { color: var(--muted); }
+.tag { font: 500 12.5px var(--font-body); padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.tag.ok { background: var(--accent-soft); color: var(--fg); }
+.tag.bad { background: var(--warn-soft); color: var(--fg); }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+td .gloss { color: var(--muted); }
+tr.win td { background: var(--accent-soft); }
+tr.win td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.pending { opacity: 0.18; }
+tr { transition: opacity 0.25s; }
+td.cost-on { color: var(--warn); }
+.verdict { max-width: 70ch; }
+.footnote { color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+/* graph */
+.edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.edge.win { stroke: var(--accent); stroke-width: 3; }
+.edge.pen { stroke: var(--warn); stroke-dasharray: 5 4; }
+.edge.pen.win { stroke: var(--accent); stroke-dasharray: none; }
+.trace { fill: none; stroke-linecap: round; }
+.trace.probe { stroke: var(--muted); stroke-width: 3; }
+.trace.final { stroke: var(--accent); stroke-width: 3.5; }
+.node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.node.free rect { stroke-dasharray: 3 3; }
+.node.win rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: none; }
+.node .glyph { font-family: var(--font-ar); font-size: 20px; fill: var(--fg); }
+.node .lat { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+.node .vow { font-family: var(--font-body); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.node .prob { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+.node .bar { fill: var(--muted); stroke: none; }
+.node.win .bar { fill: var(--accent); }
+.dot { fill: var(--fg); }
+.lane { font-family: var(--font-body); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; fill: var(--muted); }
+.lane.pen { fill: var(--warn); }
+.sep { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; fill: none; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header>
+    <h1>How the lexicon changes decoding</h1>
+    <p>Arabic normally leaves out its short vowels. The letters <span class="word" lang="ar" dir="rtl">كتب</span> (k-t-b) can be read <em>katab–</em>, <em>kutib–</em> or <em>kutub–</em>, and the decoder restores the marks from the audio.</p>
+    <p class="lede">Each slot below shows how likely the audio makes each mark. Pick a scenario, set the weight, and press Play to watch both decoders choose.</p>
+  </header>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Scenario">
+      <button type="button" id="scen-unsure" aria-pressed="true">Audio is unsure</button>
+      <button type="button" id="scen-confident" aria-pressed="false">Audio is confident</button>
+    </div>
+    <div class="weight">
+      <label for="weight">Lexicon weight <output id="weight-out" for="weight">2.0</output></label>
+      <input type="range" id="weight" min="0" max="6" step="0.1" value="2">
+    </div>
+    <button type="button" id="play">Play</button>
+  </div>
+  <p class="scenario-note" id="scenario-note"></p>
+
+  <section aria-labelledby="h-without">
+    <h2 id="h-without">Without the lexicon</h2>
+    <p class="lede">One chain. After each letter the decoder may pick any mark, so it takes whichever the audio makes most likely.</p>
+    <figure>
+      <svg id="g-without" viewBox="0 0 704 190" role="img" aria-label="A single chain of letters k, t, b. After each letter every mark is allowed and the most likely one is chosen."></svg>
+      <figcaption>Time runs left to right. The number in each slot is the audio's probability for that mark; the last letter's ending is always left open.</figcaption>
+    </figure>
+    <div class="outcome">
+      <span class="label">Decoded</span>
+      <span class="word" lang="ar" dir="rtl" id="out-without-ar"></span>
+      <span class="mono" id="out-without-lat"></span>
+      <span class="tag" id="out-without-tag"></span>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-with">
+    <h2 id="h-with">With the lexicon</h2>
+    <p class="lede">The same chain is still there, but entering it costs the weight. Beside it run the readings the lexicon lists, at no cost. The best total wins.</p>
+    <figure>
+      <svg id="g-with" viewBox="0 0 704 330" role="img" aria-label="Three lexicon paths for katab, kutib and kutub at no cost, and below them the free path, which pays the lexicon weight once."></svg>
+      <figcaption>The two readings starting with u share their first steps. The dashed slots on the free path accept any mark and show the likeliest one.</figcaption>
+    </figure>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Path</th><th>Reading</th><th class="num">Audio score</th><th class="num">Lexicon cost</th><th class="num">Total</th></tr></thead>
+        <tbody id="ledger"></tbody>
+      </table>
+    </div>
+    <div class="outcome">
+      <span class="label">Decoded</span>
+      <span class="word" lang="ar" dir="rtl" id="out-with-ar"></span>
+      <span class="mono" id="out-with-lat"></span>
+      <span class="tag" id="out-with-tag"></span>
+    </div>
+    <p class="verdict" id="verdict"></p>
+  </section>
+
+  <p class="footnote">Simplified for illustration. Scores are natural-log probabilities, so a weight of <span class="mono" id="foot-w">2.0</span> means the audio must favour an unlisted reading by a factor of about <span class="mono" id="foot-x">7.4</span> to win. The real decoder scores many audio frames per mark, keeps shadda and "no mark" available everywhere, and charges the weight once per word. The probabilities here are made up, not model output.</p>
+</div>
+
+<script>
+(function () {
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var MARK = { a: 'َ', i: 'ِ', u: 'ُ' };
+  var SCEN = {
+    unsure: {
+      p1: { a: 0.50, i: 0.08, u: 0.42 }, p2: { a: 0.30, i: 0.55, u: 0.15 }, said: ['u', 'i'],
+      note: 'The speaker said kutib– ("it was written"). On the first letter the audio barely prefers a over u.'
+    },
+    confident: {
+      p1: { a: 0.90, i: 0.03, u: 0.07 }, p2: { a: 0.08, i: 0.88, u: 0.04 }, said: ['a', 'i'],
+      note: 'The audio clearly says a, then i. Suppose that is a real form the lexicon is missing, which happens for about 5% of words.'
+    }
+  };
+  var LEX = [
+    { v: ['a', 'a'], lat: 'katab–', gloss: 'he wrote', ids: ['s', 'k', 'v1a', 'tA', 'v2a', 'bA', 'eA', 'end'] },
+    { v: ['u', 'i'], lat: 'kutib–', gloss: 'it was written', ids: ['s', 'k', 'v1u', 'tU', 'v2i', 'bB', 'eB', 'end'] },
+    { v: ['u', 'u'], lat: 'kutub–', gloss: 'books', ids: ['s', 'k', 'v1u', 'tU', 'v2u', 'bC', 'eC', 'end'] }
+  ];
+  var FREE_IDS = ['s', 'kF', 'f1', 'tF', 'f2', 'bF', 'eF', 'end'];
+  var state = { scen: 'unsure', w: 2 };
+  var runId = 0;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function $(id) { return document.getElementById(id); }
+  function el(name, attrs, parent, text) {
+    var e = document.createElementNS(SVGNS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function fmt(x) { return (x < 0 ? '−' : '') + Math.abs(x).toFixed(2); }
+  function prob(p) { return p.toFixed(2).replace(/^0/, ''); }
+  function best(p) { return Object.keys(p).reduce(function (m, k) { return p[k] > p[m] ? k : m; }); }
+  function arabic(v) { return 'ك' + MARK[v[0]] + 'ت' + MARK[v[1]] + 'ب'; }
+  function same(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function compute() {
+    var s = SCEN[state.scen];
+    var f = [best(s.p1), best(s.p2)];
+    var listed = LEX.some(function (l) { return same(l.v, f); });
+    var cands = LEX.map(function (l) {
+      return { kind: 'lex', v: l.v, lat: l.lat, gloss: l.gloss, ids: l.ids, cost: 0, audio: Math.log(s.p1[l.v[0]]) + Math.log(s.p2[l.v[1]]) };
+    });
+    cands.push({
+      kind: 'free', v: f, lat: 'k' + f[0] + 't' + f[1] + 'b–', gloss: listed ? 'also a lexicon reading' : 'not in the lexicon',
+      ids: FREE_IDS, cost: state.w, audio: Math.log(s.p1[f[0]]) + Math.log(s.p2[f[1]])
+    });
+    var win = cands[0];
+    cands.forEach(function (c) { c.total = c.audio - c.cost; if (c.total > win.total + 1e-9) win = c; });
+    return { s: s, f: f, listed: listed, cands: cands, win: win };
+  }
+
+  /* ---- graph drawing ---- */
+  function Graph(svg) {
+    this.svg = svg;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    this.gE = el('g', {}, svg); this.gT = el('g', {}, svg); this.gN = el('g', {}, svg);
+    this.nodes = {}; this.edges = {};
+  }
+  Graph.prototype.dot = function (id, x, y) {
+    el('circle', { cx: x, cy: y, r: 5, 'class': 'dot' }, this.gN);
+    this.nodes[id] = { x: x, y: y, hw: 5, g: null };
+  };
+  Graph.prototype.letter = function (id, x, y, glyph, lat) {
+    var g = el('g', { 'class': 'node' }, this.gN);
+    el('rect', { x: x - 22, y: y - 23, width: 44, height: 46, rx: 8 }, g);
+    el('text', { x: x, y: y + 3, 'class': 'glyph', 'text-anchor': 'middle' }, g, glyph);
+    el('text', { x: x, y: y + 17, 'class': 'lat', 'text-anchor': 'middle' }, g, lat);
+    this.nodes[id] = { x: x, y: y, hw: 22, g: g };
+  };
+  Graph.prototype.chip = function (id, x, y, label, p, free) {
+    var g = el('g', { 'class': 'node' + (free ? ' free' : '') }, this.gN);
+    el('rect', { x: x - 31, y: y - 15, width: 62, height: 30, rx: 15 }, g);
+    if (p == null) {
+      el('text', { x: x, y: y + 4, 'class': 'vow', 'text-anchor': 'middle' }, g, label);
+    } else {
+      el('text', { x: x - 20, y: y + 3, 'class': 'vow' }, g, label);
+      el('text', { x: x + 22, y: y + 3, 'class': 'prob', 'text-anchor': 'end' }, g, prob(p));
+      el('rect', { 'class': 'bar', x: x - 20, y: y + 7.5, width: Math.max(2, 42 * p), height: 2.5, rx: 1.25 }, g);
+    }
+    this.nodes[id] = { x: x, y: y, hw: 31, g: g };
+  };
+  Graph.prototype.edge = function (a, b, cls) {
+    var A = this.nodes[a], B = this.nodes[b];
+    var x1 = A.x + A.hw, x2 = B.x - B.hw, mx = (x1 + x2) / 2;
+    var d = 'M' + x1 + ',' + A.y + ' C' + mx + ',' + A.y + ' ' + mx + ',' + B.y + ' ' + x2 + ',' + B.y;
+    this.edges[a + '>' + b] = el('path', { d: d, 'class': 'edge' + (cls ? ' ' + cls : '') }, this.gE);
+  };
+  Graph.prototype.chain = function (ids, cls) { for (var i = 0; i < ids.length - 1; i++) this.edge(ids[i], ids[i + 1], cls && i === 0 ? cls : ''); };
+  Graph.prototype.mark = function (ids) {
+    for (var i = 0; i < ids.length; i++) {
+      var n = this.nodes[ids[i]];
+      if (n && n.g) n.g.setAttribute('class', n.g.getAttribute('class') + ' win');
+      if (i < ids.length - 1) { var e = this.edges[ids[i] + '>' + ids[i + 1]]; if (e) e.setAttribute('class', e.getAttribute('class') + ' win'); }
+    }
+  };
+  Graph.prototype.trace = function (ids, cls, per) {
+    var made = [];
+    for (var i = 0; i < ids.length - 1; i++) {
+      var src = this.edges[ids[i] + '>' + ids[i + 1]];
+      if (!src) continue;
+      var p = el('path', { d: src.getAttribute('d'), 'class': 'trace ' + cls }, this.gT);
+      var len = p.getTotalLength();
+      p.style.strokeDasharray = len + ' ' + len;
+      p.style.strokeDashoffset = len;
+      if (p.animate) p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: per, delay: i * per, fill: 'forwards', easing: 'linear' });
+      else p.style.strokeDashoffset = 0;
+      made.push(p);
+    }
+    return sleep((ids.length - 1) * per).then(function () { return made; });
+  };
+
+  function pathWithout(r) { return ['s', 'k', 'v1' + r.f[0], 't', 'v2' + r.f[1], 'b', 'e', 'end']; }
+
+  function drawWithout(r, highlight) {
+    var g = new Graph($('g-without'));
+    var Y = { a: 45, i: 95, u: 145 };
+    g.dot('s', 36, 95); g.letter('k', 110, 95, 'ك', 'k'); g.letter('t', 300, 95, 'ت', 't'); g.letter('b', 490, 95, 'ب', 'b');
+    ['a', 'i', 'u'].forEach(function (v) { g.chip('v1' + v, 205, Y[v], v, r.s.p1[v]); g.chip('v2' + v, 395, Y[v], v, r.s.p2[v]); });
+    g.chip('e', 585, 95, 'any', null); g.dot('end', 668, 95);
+    g.edge('s', 'k');
+    ['a', 'i', 'u'].forEach(function (v) { g.edge('k', 'v1' + v); g.edge('v1' + v, 't'); g.edge('t', 'v2' + v); g.edge('v2' + v, 'b'); });
+    g.edge('b', 'e'); g.edge('e', 'end');
+    if (highlight) g.mark(pathWithout(r));
+    return g;
+  }
+
+  function drawWith(r, highlight) {
+    var g = new Graph($('g-with'));
+    var s = r.s;
+    el('text', { x: 88, y: 15, 'class': 'lane' }, g.gN, 'LEXICON PATHS · NO COST');
+    el('path', { d: 'M88,233 L690,233', 'class': 'sep' }, g.gE);
+    el('text', { x: 92, y: 258, 'class': 'lane pen' }, g.gN, 'COST ' + state.w.toFixed(1));
+    el('text', { x: 174, y: 258, 'class': 'lane' }, g.gN, 'FREE PATH · ANY MARK');
+    g.dot('s', 36, 168); g.dot('end', 668, 168);
+    g.letter('k', 110, 112, 'ك', 'k');
+    g.chip('v1a', 205, 44, 'a', s.p1.a); g.chip('v1u', 205, 146, 'u', s.p1.u);
+    g.letter('tA', 300, 44, 'ت', 't'); g.letter('tU', 300, 146, 'ت', 't');
+    g.chip('v2a', 395, 44, 'a', s.p2.a); g.chip('v2i', 395, 112, 'i', s.p2.i); g.chip('v2u', 395, 180, 'u', s.p2.u);
+    [['A', 44], ['B', 112], ['C', 180]].forEach(function (row) {
+      g.letter('b' + row[0], 490, row[1], 'ب', 'b'); g.chip('e' + row[0], 585, row[1], 'any', null);
+    });
+    g.letter('kF', 110, 292, 'ك', 'k'); g.chip('f1', 205, 292, r.f[0], s.p1[r.f[0]], true);
+    g.letter('tF', 300, 292, 'ت', 't'); g.chip('f2', 395, 292, r.f[1], s.p2[r.f[1]], true);
+    g.letter('bF', 490, 292, 'ب', 'b'); g.chip('eF', 585, 292, 'any', null, true);
+    g.edge('s', 'k'); g.edge('k', 'v1a'); g.edge('k', 'v1u'); g.edge('v1a', 'tA'); g.edge('v1u', 'tU');
+    g.edge('tA', 'v2a'); g.edge('tU', 'v2i'); g.edge('tU', 'v2u');
+    g.edge('v2a', 'bA'); g.edge('v2i', 'bB'); g.edge('v2u', 'bC');
+    ['A', 'B', 'C'].forEach(function (x) { g.edge('b' + x, 'e' + x); g.edge('e' + x, 'end'); });
+    g.chain(FREE_IDS, 'pen');
+    if (highlight) g.mark(r.win.ids);
+    return g;
+  }
+
+  /* ---- text around the graphs ---- */
+  function setTag(node, ok, okText, badText) {
+    node.className = 'tag ' + (ok ? 'ok' : 'bad');
+    node.textContent = ok ? okText : badText;
+  }
+  function drawLedger(r, shown, showWin) {
+    var body = $('ledger');
+    body.textContent = '';
+    r.cands.forEach(function (c, i) {
+      var tr = document.createElement('tr');
+      if (i >= shown) tr.className = 'pending';
+      else if (showWin && c === r.win) tr.className = 'win';
+      function td(text, cls) { var d = document.createElement('td'); if (cls) d.className = cls; d.textContent = text; tr.appendChild(d); return d; }
+      td(c.kind === 'lex' ? 'Lexicon' : 'Free');
+      var reading = td('');
+      var lat = document.createElement('span'); lat.className = 'mono'; lat.textContent = c.lat;
+      var gl = document.createElement('span'); gl.className = 'gloss'; gl.textContent = ' · ' + c.gloss;
+      reading.appendChild(lat); reading.appendChild(gl);
+      td(fmt(c.audio), 'num');
+      td(c.cost ? fmt(-c.cost) : '0', 'num' + (c.cost ? ' cost-on' : ''));
+      td(fmt(c.total), 'num');
+      body.appendChild(tr);
+    });
+  }
+  function drawText(r, final) {
+    $('scenario-note').textContent = r.s.note;
+    $('weight-out').textContent = state.w.toFixed(1);
+    $('foot-w').textContent = state.w.toFixed(1);
+    var factor = Math.exp(state.w);
+    $('foot-x').textContent = factor < 100 ? factor.toFixed(1) : Math.round(factor).toLocaleString('en-US');
+    $('out-without-ar').textContent = final ? arabic(r.f) : '';
+    $('out-without-lat').textContent = final ? 'k' + r.f[0] + 't' + r.f[1] + 'b–' : '…';
+    $('out-with-ar').textContent = final ? arabic(r.win.v) : '';
+    $('out-with-lat').textContent = final ? r.win.lat : '…';
+    var t1 = $('out-without-tag'), t2 = $('out-with-tag');
+    t1.hidden = t2.hidden = !final;
+    setTag(t1, same(r.f, r.s.said), 'matches what was said', 'not what was said');
+    setTag(t2, same(r.win.v, r.s.said), 'matches what was said', 'not what was said');
+    var free = r.cands[r.cands.length - 1];
+    var bestLex = r.cands.slice(0, 3).reduce(function (m, c) { return c.total > m.total ? c : m; });
+    var v = $('verdict');
+    if (!final) { v.textContent = ''; return; }
+    if (r.win.kind === 'free') {
+      v.textContent = 'The audio prefers ' + free.lat + ' strongly enough to pay the weight: ' + fmt(free.audio) + ' − ' + state.w.toFixed(1) + ' = ' + fmt(free.total) +
+        ', still above the best lexicon reading (' + bestLex.lat + ' at ' + fmt(bestLex.total) + ').';
+    } else {
+      v.textContent = r.win.lat + ' wins at ' + fmt(r.win.total) + '. The free path would give ' + free.lat + ', but after the weight it scores ' + fmt(free.total) + '.';
+    }
+  }
+
+  function renderStatic() {
+    var r = compute();
+    drawWithout(r, true); drawWith(r, true);
+    drawLedger(r, r.cands.length, true); drawText(r, true);
+  }
+
+  function play() {
+    if (reduceMotion) { renderStatic(); return; }
+    var my = ++runId;
+    var r = compute();
+    var btn = $('play');
+    btn.disabled = true;
+    var gA = drawWithout(r, false), gB = drawWith(r, false);
+    drawLedger(r, 0, false); drawText(r, false);
+    var alive = function () { return my === runId; };
+    gA.trace(pathWithout(r), 'final', 190).then(function () {
+      if (!alive()) return;
+      gA.mark(pathWithout(r));
+      var chain = Promise.resolve();
+      r.cands.forEach(function (c, i) {
+        chain = chain.then(function () {
+          if (!alive()) return;
+          return gB.trace(c.ids, 'probe', 130).then(function (made) {
+            if (!alive()) return;
+            drawLedger(r, i + 1, false);
+            return sleep(260).then(function () { made.forEach(function (p) { if (p.parentNode) p.parentNode.removeChild(p); }); });
+          });
+        });
+      });
+      return chain.then(function () {
+        if (!alive()) return;
+        return gB.trace(r.win.ids, 'final', 170);
+      });
+    }).then(function () {
+      if (!alive()) return;
+      renderStatic();
+      btn.disabled = false;
+    });
+  }
+
+  function change() { runId++; $('play').disabled = false; renderStatic(); }
+  ['unsure', 'confident'].forEach(function (name) {
+    $('scen-' + name).addEventListener('click', function () {
+      state.scen = name;
+      $('scen-unsure').setAttribute('aria-pressed', String(name === 'unsure'));
+      $('scen-confident').setAttribute('aria-pressed', String(name === 'confident'));
+      change();
+    });
+  });
+  $('weight').addEventListener('input', function (e) { state.w = parseFloat(e.target.value); change(); });
+  $('play').addEventListener('click', play);
+
+  renderStatic();
+})();
+</script>
+</body>
+</html>

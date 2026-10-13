@@ -82,7 +82,7 @@ This led to two design choices: restrict the stem only, and make the constraint 
 
 ## How the decoder uses the lexicon
 
-The change is in `build_pattern_fsa` in `src/diactc/models/base.py`.
+The change is in `build_pattern_fsa` in `src/diactc/models/base.py`. An animated walk-through on the word `كتب` is in [lexicon_decoding_illustration.html](lexicon_decoding_illustration.html); open it in a browser.
 
 **Without a lexicon**, each word in the pattern graph is a straight chain: a letter, then a slot offering every allowed diacritic, then the next letter. All arcs cost nothing, so the audio alone decides.
 
@@ -155,12 +155,11 @@ DER is with case endings and includes no-diacritic positions unless the column s
 
 - **Tuned on the test sets.** The weight is one scalar, so overfitting is limited, but the gain should be confirmed on held-out data.
 - **One model, two datasets.** Both are read or formal Modern Standard Arabic; the lexicon may behave differently on dialectal or conversational speech.
-- **ArVoice references are partly undiacritized**, which lowers its scores in the "including no-diacritic" DER variants independently of the lexicon.
 - **No interaction test** with the confidence threshold.
 
 ## Recommendation
 
-Keep the lexicon off by default. For ArVoice-like text it is a safe, small improvement at `--lexicon_weight 2`. A larger gain would need a lexicon that covers case endings and marks gemination, since those are where the remaining errors are.
+Keep the lexicon off by default. For ArVoice-like (MSA) text it is a safe, small improvement at `--lexicon_weight 2`. A larger gain would need a lexicon that covers case endings and marks gemination, since those are where the remaining errors are.
 
 ## Reproducing
 
