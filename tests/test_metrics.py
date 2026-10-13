@@ -15,6 +15,7 @@ from diactc.metrics import (
     calculate_wer_strict,
     calculate_ser_strict,
     diac_coverage_rate,
+    diac_precision_recall,
     evaluate,
 )
 
@@ -109,6 +110,38 @@ class TestCoverage:
     def test_no_arabic_raises(self):
         with pytest.raises(ValueError):
             diac_coverage_rate("hello")
+
+
+class TestPrecisionRecall:
+    def test_perfect_match(self):
+        result = diac_precision_recall("بِسْمِ", "بِسْمِ")
+        assert result["precision"] == 1.0
+        assert result["recall"] == 1.0
+
+    def test_dropped_diacritic_lowers_recall_only(self):
+        result = diac_precision_recall("بِسْمِ", "بِسْم")
+        assert result["precision"] == 1.0
+        assert result["recall"] == pytest.approx(2 / 3)
+
+    def test_wrong_diacritic_lowers_both(self):
+        result = diac_precision_recall("بِسْمِ", "بَسْمِ")
+        assert result["precision"] == pytest.approx(2 / 3)
+        assert result["recall"] == pytest.approx(2 / 3)
+
+    def test_undiacritized_hypothesis_has_no_precision(self):
+        result = diac_precision_recall("بِسْمِ", "بسم")
+        assert result["precision"] is None
+        assert result["recall"] == 0.0
+
+    def test_counts_are_summed_over_lines(self):
+        result = diac_precision_recall(["بِسْمِ", "اللَّهِ"], ["بِسْمِ", "اللَّهُ"])
+        assert result["emitted"] == 5
+        assert result["correct"] == 4
+
+    def test_lines_with_different_base_characters_are_skipped(self):
+        result = diac_precision_recall(["بِسْمِ", "بِسْمِ"], ["بِسْمِ", "بِسْ"])
+        assert result["skipped"] == 1
+        assert result["positions"] == 3
 
 
 class TestEvaluate:
