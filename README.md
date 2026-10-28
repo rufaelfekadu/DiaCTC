@@ -217,10 +217,13 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 If you use DiaCTC in your research, please cite:
 
 ```bibtex
-@article{marew2026constrained,
-  title   = {Constrained CTC Decoding for Efficient Diacritic Restoration},
-  author  = {Marew, Rufael and Keleg, Amr and Aldarmaki, Hanan},
-  journal = {arXiv preprint arXiv:TBD},
-  year    = {2026}
+@inproceedings{marew26_interspeech,
+  title     = {{Constrained CTC decoding for Efficient Diacritic Restoration}},
+  author    = {Rufael Marew and Amr Keleg and Hanan Aldarmaki},
+  year      = {2026},
+  booktitle = {{Interspeech 2026}},
+  pages     = {799--803},
+  doi       = {10.21437/Interspeech.2026-3220},
+  issn      = {2958-1796},
 }
 ```
